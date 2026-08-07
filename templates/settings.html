@@ -38,8 +38,13 @@
             <h2>Приватность</h2>
             <div class="settings-row">
                 <div class="settings-row-info"><div class="label">Приватный профиль</div><div class="desc">Только подписчики видят ваши публикации.</div></div>
-                <label class="toggle {% if cu.is_private %}on{% endif %}" id="private-toggle" onclick="this.classList.toggle('on')"></label>
+                <label class="toggle {% if cu.is_private %}on{% endif %}" id="private-toggle" onclick="this.classList.toggle('on');document.getElementById('is-private-input').value=this.classList.contains('on')?'1':''"></label>
                 <input type="hidden" name="is_private" id="is-private-input" value="{% if cu.is_private %}1{% endif %}">
+            </div>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Email-уведомления</div><div class="desc">Получать письма при лайках, комментариях и подписках.</div></div>
+                <label class="toggle {% if cu.email_notifs %}on{% endif %}" id="email-toggle" onclick="this.classList.toggle('on');document.getElementById('email-input').value=this.classList.contains('on')?'1':''"></label>
+                <input type="hidden" name="email_notifs" id="email-input" value="{% if cu.email_notifs %}1{% endif %}">
             </div>
         </div>
 
@@ -60,5 +65,31 @@
             <button type="button" class="btn btn-danger-outline" style="margin-left:auto" onclick="if(confirm('Выйти?'))location.href='{{ url_for('logout') }}'"><svg class="icon icon-sm"><use href="#i-log-out"/></svg> Выйти</button>
         </div>
     </form>
+
+    <div class="settings-section">
+        <h2>Безопасность</h2>
+        <p class="section-desc">Смена пароля.</p>
+        <form method="POST" action="{{ url_for('change_password') }}" style="display:flex;flex-direction:column;gap:10px;max-width:320px">
+            <input class="input" type="password" name="current_password" placeholder="Текущий пароль" required>
+            <input class="input" type="password" name="new_password" placeholder="Новый пароль (мин. 6)" required minlength="6">
+            <input class="input" type="password" name="confirm_password" placeholder="Повторите новый пароль" required>
+            <div><button type="submit" class="btn btn-primary btn-sm">Сменить пароль</button></div>
+        </form>
+    </div>
+
+    <div class="settings-section danger-zone">
+        <h2>Опасная зона</h2>
+        <div class="settings-row">
+            <div class="settings-row-info"><div class="label">Выйти со всех устройств</div><div class="desc">Завершить все сессии, кроме текущей.</div></div>
+            <form method="POST" action="{{ url_for('logout_all') }}"><button type="submit" class="btn btn-danger-outline btn-sm">Выйти везде</button></form>
+        </div>
+        <div class="settings-row">
+            <div class="settings-row-info"><div class="label">Удалить аккаунт</div><div class="desc">Безвозвратно. Все данные будут стёрты.</div></div>
+            <form method="POST" action="{{ url_for('delete_account') }}" style="display:flex;gap:6px" onsubmit="return confirm('Удалить аккаунт навсегда?')">
+                <input class="input" type="password" name="delete_password" placeholder="Пароль" required style="max-width:140px">
+                <button type="submit" class="btn btn-sm" style="background:var(--danger);color:white">Удалить</button>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %}

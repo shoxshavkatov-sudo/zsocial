@@ -78,6 +78,9 @@
     <button class="bottombar-item {% if request.endpoint == 'people' %}active{% endif %}" onclick="location.href='{{ url_for('people') }}'" title="Поиск">
         <svg class="icon"><use href="#i-search"/></svg>
     </button>
+    <button class="bottombar-item compose-btn" onclick="location.href='{{ url_for('feed') }}'" title="Новый пост">
+        <svg class="icon"><use href="#i-plus"/></svg>
+    </button>
     <button class="bottombar-item {% if request.endpoint == 'chat' %}active{% endif %}" onclick="location.href='{{ url_for('chat') }}'" title="Сообщения">
         <svg class="icon"><use href="#i-chat"/></svg>
         {% if unread_msgs > 0 %}<span class="bb-badge">{{ unread_msgs }}</span>{% endif %}
@@ -90,7 +93,7 @@
         <svg class="icon"><use href="#i-bookmark"/></svg>
     </button>
     <button class="bottombar-item {% if request.endpoint == 'profile' %}active{% endif %}" onclick="location.href='{{ url_for('profile', username=cu.username) }}'" title="Профиль">
-        <img src="{{ url_for('static', filename=cu.avatar) }}" class="bottombar-avatar" alt="">
+        <img src="{{ media_url(cu.avatar) }}" class="bottombar-avatar" alt="">
     </button>
     {% if cu.role == 'admin' %}
     <button class="bottombar-item {% if request.endpoint == 'admin' %}active{% endif %}" onclick="location.href='{{ url_for('admin') }}'" title="Админ">

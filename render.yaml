@@ -11,4 +11,24 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: RENDER
+        value: "true"
+      # Email (SMTP). Без них mailer работает в no-op режиме — сайт функционирует.
+      - key: MAIL_ENABLED
+        value: "0"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+    # Persistent disk: БД (social.db) и uploads переживают деплой и рестарт.
+    disk:
+      name: zsocial-data
+      mountPath: /opt/render/.data
+      sizeGB: 1
     autoDeploy: true

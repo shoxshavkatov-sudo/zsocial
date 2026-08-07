@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Редактировать пост · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="page-header">
+        <button class="back-btn" onclick="location.href='{{ url_for('feed') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <h1>Редактировать пост</h1>
+    </div>
+    <div style="padding:16px">
+        <form method="POST" id="edit-form">
+            <textarea name="content" rows="5" maxlength="500"
+                style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);font-size:15px;resize:vertical;outline:none;font-family:inherit"
+                oninput="document.getElementById('cc').textContent=this.value.length">{{ post.content }}</textarea>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+                <span class="text-sm text-muted"><span id="cc">{{ post.content|length }}</span>/500</span>
+                <div style="display:flex;gap:8px">
+                    <button type="button" class="btn btn-ghost" onclick="location.href='{{ url_for('feed') }}'">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

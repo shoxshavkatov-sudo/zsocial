@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, jsonify
+    session, flash, jsonify, send_from_directory
 )
 from flask_socketio import SocketIO, emit, join_room
 from werkzeug.utils import secure_filename
@@ -15,8 +15,9 @@ import uuid
 from config import Config
 from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
-    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, SiteSettings
+    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, SiteSettings
 )
+import mailer
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -30,6 +31,17 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async)
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 app.teardown_appcontext(close_db)
+
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Отдаёт загруженные пользователями файлы из UPLOAD_FOLDER.
+
+    Физически файлы лежат ВНЕ static/ (в папке данных), поэтому для их показа
+    нужен отдельный роут. Шаблоны используют хелпер media_url(), который для
+    пользовательских файлов строит URL сюда.
+    """
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 # Версия приложения — для cache-busting статики (каждый деплой = новый хэш)
 APP_VERSION = os.environ.get('RENDER_GIT_COMMIT', 'dev')[:8] or str(int(__import__('time').time()))
@@ -98,6 +110,18 @@ with app.app_context():
 
 
 # ==================== ХЕЛПЕРЫ ====================
+def _media_for(path):
+    """URL для медиа-пути из БД. img/... → static; иначе → /uploads/..."""
+    if not path:
+        return ''
+    if isinstance(path, str) and path.startswith(('img/', 'css/', 'js/')):
+        return url_for('static', filename=path)
+    # Загруженные файлы: БД хранит 'uploads/<name>', убираем префикс для serve_upload
+    if isinstance(path, str) and path.startswith('uploads/'):
+        path = path[len('uploads/'):]
+    return url_for('serve_upload', filename=path)
+
+
 def allowed_file(fn):
     return '.' in fn and fn.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
@@ -115,7 +139,14 @@ def current_user():
     if 'user_id' not in session:
         return None
     u = User.get(session['user_id'])
-    if u and u['banned']:
+    if not u:
+        session.pop('user_id', None)
+        return None
+    if u['banned']:
+        session.pop('user_id', None)
+        return None
+    # Проверка версии токена (выход со всех устройств)
+    if session.get('token_version', 0) != u['token_version']:
         session.pop('user_id', None)
         return None
     return u
@@ -169,11 +200,17 @@ def inject_globals():
     if u:
         notifs = Notification.unread_count(u['id'])
         msgs = Message.unread_count(u['id'])
+
+    def media_url(path):
+        """Строит правильный URL для медиа по пути из БД (см. _media_for)."""
+        return _media_for(path)
+
     return dict(cu=u, unread_notifs=notifs, unread_msgs=msgs,
                 site_name=site.get('site_name', 'ZSocial'),
                 site_desc=site.get('site_desc', ''),
                 site=site,
-                v=APP_VERSION)
+                v=APP_VERSION,
+                media_url=media_url)
 
 
 @app.context_processor
@@ -217,6 +254,7 @@ def register():
             return render_template('register.html')
         u = User.create(un, em, pw)
         session['user_id'] = u['id']
+        session['token_version'] = u['token_version'] if 'token_version' in u.keys() else 0
         flash(f'Добро пожаловать, {un}!', 'success')
         return redirect(url_for('feed'))
     return render_template('register.html')
@@ -235,6 +273,7 @@ def login():
                 flash('Аккаунт заблокирован', 'error')
                 return render_template('login.html')
             session['user_id'] = u['id']
+            session['token_version'] = u['token_version']
             flash(f'С возвращением, {u["username"]}!', 'success')
             return redirect(url_for('feed'))
         flash('Неверные данные', 'error')
@@ -260,7 +299,9 @@ def feed():
         posts = Post.get_all(tag=tag or None)
     liked = {p['id'] for p in posts if Like.is_liked(session['user_id'], p['id'])}
     saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
-    return render_template('feed.html', posts=posts, liked_posts=liked, saved_posts=saved_ids, tab=tab, tag=tag)
+    trending = Post.get_trending_tags(10)
+    return render_template('feed.html', posts=posts, liked_posts=liked, saved_posts=saved_ids,
+                           tab=tab, tag=tag, trending=trending)
 
 
 @app.route('/post/create', methods=['POST'])
@@ -288,6 +329,41 @@ def delete_post(pid):
     return redirect(request.referrer or url_for('feed'))
 
 
+@app.route('/post/<int:pid>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_post(pid):
+    post = Post.get(pid)
+    if not post:
+        flash('Не найдено', 'error')
+        return redirect(url_for('feed'))
+    if post['user_id'] != session['user_id'] and current_user()['role'] != 'admin':
+        flash('Нет прав', 'error')
+        return redirect(url_for('feed'))
+    if request.method == 'POST':
+        content = request.form.get('content', '').strip()
+        if not content:
+            flash('Пост пуст', 'error')
+            return redirect(url_for('edit_post', pid=pid))
+        Post.edit(pid, session['user_id'], content)
+        flash('Сохранено', 'success')
+        return redirect(url_for('feed'))
+    return render_template('edit_post.html', post=post)
+
+
+@app.route('/post/<int:pid>/repost', methods=['POST'])
+@login_required
+def repost(pid):
+    parent = Post.get(pid)
+    if not parent:
+        return jsonify({'error': 'Не найдено'}), 404
+    quote = request.get_json(silent=True)
+    quote_text = (quote.get('quote') or '').strip() if quote else ''
+    new = Post.repost(session['user_id'], pid, quote_text)
+    if new:
+        return jsonify({'ok': True, 'id': new['id']})
+    return jsonify({'error': 'Вы уже поделились этим постом'}), 400
+
+
 @app.route('/post/<int:pid>/like', methods=['POST'])
 @login_required
 def toggle_like(pid):
@@ -297,6 +373,10 @@ def toggle_like(pid):
     liked = Like.toggle(session['user_id'], pid)
     if liked:
         Notification.create(post['user_id'], session['user_id'], 'like', pid)
+        owner = User.get(post['user_id'])
+        if owner and owner['email_notifs'] and owner['id'] != session['user_id']:
+            actor = current_user()
+            mailer.notify_like(owner['email'], actor['display_name'] or actor['username'], (post['content'] or '')[:80])
     return jsonify({'liked': liked, 'count': Like.count(pid)})
 
 
@@ -320,9 +400,14 @@ def add_comment(pid):
         return jsonify({'error': 'Пусто'}), 400
     c = Comment.create(session['user_id'], pid, content)
     Notification.create(post['user_id'], session['user_id'], 'comment', pid)
+    owner = User.get(post['user_id'])
+    if owner and owner['email_notifs'] and owner['id'] != session['user_id']:
+        actor = current_user()
+        mailer.notify_comment(owner['email'], actor['display_name'] or actor['username'], (post['content'] or '')[:80])
     return jsonify({
         'id': c['id'], 'content': c['content'], 'username': c['username'],
-        'avatar': c['avatar'], 'verified': c['verified'],
+        'avatar': c['avatar'], 'avatar_url': _media_for(c['avatar']),
+        'verified': c['verified'],
         'time': time_ago(c['created_at'])
     })
 
@@ -332,7 +417,8 @@ def add_comment(pid):
 def get_comments(pid):
     return jsonify([{
         'id': c['id'], 'content': c['content'], 'username': c['username'],
-        'avatar': c['avatar'], 'verified': c['verified'],
+        'avatar': c['avatar'], 'avatar_url': _media_for(c['avatar']),
+        'verified': c['verified'],
         'time': time_ago(c['created_at'])
     } for c in Comment.get_by_post(pid)])
 
@@ -369,10 +455,59 @@ def settings():
                     bio=request.form.get('bio', '').strip(),
                     status=request.form.get('status', '').strip(),
                     avatar=save_file(avatar, 'avatar'),
-                    is_private=1 if request.form.get('is_private') else 0)
+                    cover=save_file(cover, 'cover'),
+                    is_private=1 if request.form.get('is_private') else 0,
+                    email_notifs=1 if request.form.get('email_notifs') else 0)
         flash('Сохранено', 'success')
         return redirect(url_for('settings'))
     return render_template('settings.html')
+
+
+@app.route('/settings/password', methods=['POST'])
+@login_required
+def change_password():
+    u = current_user()
+    cur = request.form.get('current_password', '')
+    new = request.form.get('new_password', '')
+    conf = request.form.get('confirm_password', '')
+    if not User.verify(u['password_hash'], cur):
+        flash('Неверный текущий пароль', 'error')
+        return redirect(url_for('settings'))
+    if len(new) < 6:
+        flash('Новый пароль минимум 6 символов', 'error')
+        return redirect(url_for('settings'))
+    if new != conf:
+        flash('Пароли не совпадают', 'error')
+        return redirect(url_for('settings'))
+    User.change_password(u['id'], new)
+    User.logout_everywhere(u['id'])
+    session.clear()
+    flash('Пароль изменён. Войдите заново.', 'success')
+    return redirect(url_for('login'))
+
+
+@app.route('/settings/delete', methods=['POST'])
+@login_required
+def delete_account():
+    u = current_user()
+    pw = request.form.get('delete_password', '')
+    if not User.verify(u['password_hash'], pw):
+        flash('Неверный пароль', 'error')
+        return redirect(url_for('settings'))
+    User.delete(u['id'])
+    session.clear()
+    flash('Аккаунт удалён', 'success')
+    return redirect(url_for('register'))
+
+
+@app.route('/settings/logout_all', methods=['POST'])
+@login_required
+def logout_all():
+    u = current_user()
+    User.logout_everywhere(u['id'])
+    session.clear()
+    flash('Вы вышли со всех устройств', 'success')
+    return redirect(url_for('login'))
 
 
 @app.route('/follow/<int:uid>', methods=['POST'])
@@ -386,6 +521,10 @@ def toggle_follow(uid):
     f = Follow.toggle(session['user_id'], uid)
     if f:
         Notification.create(uid, session['user_id'], 'follow')
+        target = User.get(uid)
+        if target and target['email_notifs']:
+            actor = current_user()
+            mailer.notify_follow(target['email'], actor['display_name'] or actor['username'])
     return jsonify({'following': f, 'count': Follow.followers_count(uid)})
 
 
@@ -394,9 +533,23 @@ def toggle_follow(uid):
 @login_required
 def people():
     q = request.args.get('q', '')
-    users = User.search(q) if q else [x for x in User.get_all() if x['id'] != session['user_id'] and x['banned'] == 0]
+    tab = request.args.get('tab', 'users')
+    users = []
+    posts_results = []
     following_ids = {f['followed_id'] for f in Follow.get_following(session['user_id'])}
-    return render_template('people.html', users=users, following_ids=following_ids, q=q)
+    liked = set()
+    saved_ids = set()
+    if q:
+        if tab == 'posts':
+            posts_results = Post.search_content(q)
+            liked = {p['id'] for p in posts_results if Like.is_liked(session['user_id'], p['id'])}
+            saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
+        else:
+            users = User.search(q)
+    else:
+        users = [x for x in User.get_all() if x['id'] != session['user_id'] and x['banned'] == 0]
+    return render_template('people.html', users=users, following_ids=following_ids, q=q, tab=tab,
+                           posts=posts_results, liked_posts=liked, saved_posts=saved_ids)
 
 
 # ==================== ЗАКЛАДКИ ====================
@@ -422,6 +575,10 @@ def chat():
         partner = User.get_by_username(with_user)
         if partner:
             messages = Message.get_conversation(u['id'], partner['id'])
+            # подгружаем реакции для каждого сообщения
+            messages = [dict(m) for m in messages]
+            for m in messages:
+                m['reactions'] = [{'emoji': r['emoji'], 'count': r['cnt']} for r in Message.get_reactions(m['id'])]
             Message.mark_read(partner['id'], u['id'])
     return render_template('chat.html', dialogs=dialogs, partner=partner, messages=messages)
 
@@ -479,10 +636,42 @@ def send_message():
         'sender_id': msg['sender_id'], 'receiver_id': msg['receiver_id'],
         'time': time_ago(msg['created_at']),
         'sender_username': u['username'], 'sender_avatar': u['avatar'],
-        'file_url_full': (url_for('static', filename=msg['file_url']) if msg['file_url'] else None),
+        'file_url_full': (_media_for(msg['file_url']) if msg['file_url'] else None),
     }
     socketio.emit('new_message', data, room=f'user_{rid}')
     socketio.emit('new_message', data, room=f'user_{u["id"]}')
+    return jsonify(data)
+
+
+@app.route('/chat/<int:mid>/delete', methods=['POST'])
+@login_required
+def delete_message(mid):
+    m = Message.get(mid)
+    if not m:
+        return jsonify({'error': 'Не найдено'}), 404
+    receiver = m['receiver_id']
+    sender = m['sender_id']
+    if not Message.delete(mid, session['user_id']):
+        return jsonify({'error': 'Нет прав'}), 403
+    socketio.emit('message_deleted', {'id': mid}, room=f'user_{receiver}')
+    socketio.emit('message_deleted', {'id': mid}, room=f'user_{sender}')
+    return jsonify({'ok': True})
+
+
+@app.route('/chat/<int:mid>/react', methods=['POST'])
+@login_required
+def react_message(mid):
+    m = Message.get(mid)
+    if not m:
+        return jsonify({'error': 'Не найдено'}), 404
+    emoji = (request.get_json(silent=True) or {}).get('emoji', '').strip()
+    if not emoji or len(emoji) > 8:
+        return jsonify({'error': 'Некорректная реакция'}), 400
+    added = Message.toggle_reaction(mid, session['user_id'], emoji)
+    reactions = [{'emoji': r['emoji'], 'count': r['cnt']} for r in Message.get_reactions(mid)]
+    data = {'id': mid, 'reactions': reactions}
+    socketio.emit('message_reaction', data, room=f'user_{m["receiver_id"]}')
+    socketio.emit('message_reaction', data, room=f'user_{m["sender_id"]}')
     return jsonify(data)
 
 
@@ -493,6 +682,20 @@ def notifications():
     ns = Notification.get_all(session['user_id'])
     Notification.mark_all_read(session['user_id'])
     return render_template('notifications.html', notifications=ns)
+
+
+# ==================== ЖАЛОБЫ ====================
+@app.route('/report', methods=['POST'])
+@login_required
+def report():
+    data = request.get_json(silent=True) or {}
+    target_type = data.get('target_type', '')
+    target_id = data.get('target_id')
+    reason = (data.get('reason') or '')[:500]
+    if target_type not in ('post', 'user', 'message') or not target_id:
+        return jsonify({'error': 'Некорректный запрос'}), 400
+    Report.create(session['user_id'], target_type, int(target_id), reason)
+    return jsonify({'ok': True})
 
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
@@ -510,6 +713,7 @@ def admin():
         'verified': db.execute('SELECT COUNT(*) c FROM users WHERE verified=1').fetchone()['c'],
         'banned': db.execute('SELECT COUNT(*) c FROM users WHERE banned=1').fetchone()['c'],
         'private': db.execute('SELECT COUNT(*) c FROM users WHERE is_private=1').fetchone()['c'],
+        'reports': db.execute('SELECT COUNT(*) c FROM reports WHERE status="pending"').fetchone()['c'],
     }
     top_users = db.execute('''
         SELECT u.*, (SELECT COUNT(*) FROM posts WHERE user_id=u.id) as post_count
@@ -517,8 +721,9 @@ def admin():
     ''').fetchall()
     all_users = User.get_all()
     all_posts = Post.get_all(limit=200)
+    reports = Report.get_all(status='pending') if tab == 'reports' else None
     return render_template('admin.html', tab=tab, stats=stats, top_users=top_users,
-                           all_users=all_users, all_posts=all_posts)
+                           all_users=all_users, all_posts=all_posts, reports=reports)
 
 
 @app.route('/admin/user/<int:uid>/ban', methods=['POST'])
@@ -572,11 +777,45 @@ def admin_settings_save():
     return redirect(url_for('admin', tab='system'))
 
 
+@app.route('/admin/report/<int:rid>/resolve', methods=['POST'])
+@admin_required
+def admin_resolve_report(rid):
+    Report.resolve(rid)
+    return jsonify({'ok': True})
+
+
+@app.route('/admin/post/<int:pid>/delete', methods=['POST'])
+@admin_required
+def admin_delete_post(pid):
+    if Post.delete(pid, 0, force=True):
+        return jsonify({'ok': True})
+    return jsonify({'error': 'Не найдено'}), 404
+
+
 # ==================== WEBSOCKET ====================
 @socketio.on('connect')
 def handle_connect():
     if 'user_id' in session:
         join_room(f'user_{session["user_id"]}')
+
+
+@socketio.on('typing')
+def handle_typing(data):
+    """Индикатор «печатает»: шлём получателю."""
+    if 'user_id' not in session:
+        return
+    to = (data or {}).get('to')
+    if to:
+        emit('typing', {'from': session['user_id']}, room=f'user_{to}')
+
+
+@socketio.on('stop_typing')
+def handle_stop_typing(data):
+    if 'user_id' not in session:
+        return
+    to = (data or {}).get('to')
+    if to:
+        emit('stop_typing', {'from': session['user_id']}, room=f'user_{to}')
 
 
 # ==================== 404 ====================

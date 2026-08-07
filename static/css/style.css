@@ -563,3 +563,61 @@ html.theme-transitioning *::after {
 .chat-preview .preview-remove { cursor: pointer; color: var(--text-muted); padding: 4px; }
 .chat-preview .preview-remove:hover { color: var(--danger); }
 
+
+/* ===== ТРЕНДОВЫЕ ТЕГИ ===== */
+.trending-tags { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.trending-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 8px; }
+.trending-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.trending-tag { padding: 5px 12px; border-radius: 999px; background: var(--bg-muted); border: 1px solid var(--border); color: var(--highlight); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.trending-tag:hover { background: var(--highlight-soft); border-color: var(--highlight); }
+.trending-count { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+
+/* ===== УПОМИНАНИЯ ===== */
+.post-body .mention { color: var(--highlight); cursor: pointer; font-weight: 500; }
+.post-body .mention:hover { text-decoration: underline; }
+
+/* ===== РЕПОСТЫ ===== */
+.repost-header { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); padding: 8px 12px 0; flex-wrap: wrap; }
+.repost-header a { color: var(--highlight); font-weight: 500; cursor: pointer; }
+.repost-original { margin: 8px 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; border-left: 3px solid var(--highlight); }
+
+/* ===== КНОПКА СОЗДАНИЯ ПОСТА (bottombar) ===== */
+.bottombar-item.compose-btn { background: var(--accent); color: white; border-radius: 50%; width: 44px; height: 44px; margin: 0 4px; align-self: center; }
+.bottombar-item.compose-btn:hover { background: var(--highlight); transform: scale(1.05); }
+.bottombar-item.compose-btn .icon { width: 22px; height: 22px; }
+
+/* ===== ИНДИКАТОР ПЕЧАТИ (чат) ===== */
+.typing-indicator { padding: 4px 16px; font-size: 12px; color: var(--text-muted); font-style: italic; display: none; }
+.typing-indicator.visible { display: flex; align-items: center; gap: 6px; }
+.typing-dots { display: inline-flex; gap: 3px; }
+.typing-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); animation: typingBounce 1.2s infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingBounce { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+/* ===== СТАТУС ПРОЧТЕНИЯ (галочки) ===== */
+.msg-check { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; }
+.msg-check svg { width: 14px; height: 14px; }
+.msg-check.read { color: var(--highlight); }
+.msg-check.unread { color: var(--text-muted); }
+
+/* ===== РЕАКЦИИ НА СООБЩЕНИЯ ===== */
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.msg-reaction { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; background: var(--bg-muted); border: 1px solid var(--border); font-size: 12px; cursor: pointer; transition: all 0.12s; }
+.msg-reaction:hover { background: var(--highlight-soft); }
+.msg-reaction.mine { background: var(--highlight-soft); border-color: var(--highlight); }
+.msg-reaction .reaction-emoji { font-size: 13px; }
+.msg-reaction .reaction-count { color: var(--text-secondary); font-weight: 600; font-size: 11px; }
+.reaction-picker { display: flex; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow-lg); position: absolute; z-index: 100; }
+.reaction-picker button { background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px 4px; border-radius: 50%; transition: transform 0.1s; }
+.reaction-picker button:hover { transform: scale(1.3); }
+.msg-actions-bar { position: absolute; top: -28px; right: 4px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 2px; box-shadow: var(--shadow); z-index: 50; }
+.msg.mine .msg-actions-bar { right: auto; left: 4px; }
+.msg:hover .msg-actions-bar { display: flex; }
+.msg-actions-bar button { background: none; border: none; padding: 4px 6px; border-radius: 999px; cursor: pointer; color: var(--text-secondary); font-size: 14px; }
+.msg-actions-bar button:hover { background: var(--bg-hover); color: var(--danger); }
+.msg { position: relative; }
+
+/* ===== СМЕНА ПАРОЛЯ / АККАУНТ ===== */
+.danger-zone { border: 1px solid var(--danger) !important; border-radius: 12px; }
+.danger-zone h2 { color: var(--danger); }

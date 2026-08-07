@@ -8,7 +8,7 @@
             {% if dialogs %}
                 {% for d in dialogs %}
                 <button class="chat-list-item {% if partner and partner.id == d.other_id %}active{% endif %}" onclick="location.href='{{ url_for('chat', with=d.username) }}'">
-                    <img src="{{ url_for('static', filename=d.avatar) }}">
+                    <img src="{{ media_url(d.avatar) }}">
                     <div class="chat-list-info">
                         <div class="chat-list-top">
                             <span class="name">{{ d.display_name or d.username }} {% if d.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</span>
@@ -41,7 +41,7 @@
         {% if partner %}
         <div class="chat-window-head">
             <button class="btn btn-ghost btn-icon-only" onclick="location.href='{{ url_for('chat') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
-            <img src="{{ url_for('static', filename=partner.avatar) }}" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
+            <img src="{{ media_url(partner.avatar) }}" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
             <div class="info" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
                 <strong>{{ partner.display_name or partner.username }} {% if partner.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</strong>
                 <span>@{{ partner.username }}</span>
@@ -51,32 +51,60 @@
         <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
             {% if messages %}
                 {% for m in messages %}
-                <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %}">
+                <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %}" id="msg-{{ m.id }}" data-msg-id="{{ m.id }}">
+                    {% if m.sender_id == cu.id %}
+                    <div class="msg-actions-bar">
+                        <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
+                        <button onclick="deleteMsg({{ m.id }})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>
+                    </div>
+                    {% else %}
+                    <div class="msg-actions-bar">
+                        <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
+                    </div>
+                    {% endif %}
                     {% if m.msg_type == 'audio' %}
                         <div class="msg-bubble voice-msg">
-                            <button class="voice-play-btn" onclick="playVoice(this)" data-src="{{ url_for('static', filename=m.file_url) if m.file_url else '' }}">
+                            <button class="voice-play-btn" onclick="playVoice(this)" data-src="{{ media_url(m.file_url) if m.file_url else '' }}">
                                 <svg class="icon"><use href="#i-play"/></svg>
                             </button>
                             <div class="voice-waveform">
                                 {% for i in range(20) %}<div class="wave-bar" style="height:{% if loop.index0 % 3 == 0 %}100%{% elif loop.index0 % 2 == 0 %}60%{% else %}40%{% endif %};animation-delay:{{ loop.index0 * 0.05 }}s"></div>{% endfor %}
                             </div>
                             <span class="voice-duration">{{ '%02d:%02d'|format((m.duration or 0)//60, (m.duration or 0)%60) }}</span>
-                            <audio src="{{ url_for('static', filename=m.file_url) if m.file_url else '' }}" preload="none"></audio>
+                            <audio src="{{ media_url(m.file_url) if m.file_url else '' }}" preload="none"></audio>
                         </div>
                     {% elif m.msg_type == 'image' and m.file_url %}
-                        <img src="{{ url_for('static', filename=m.file_url) }}" class="msg-image" onclick="window.open('{{ url_for('static', filename=m.file_url) }}')">
+                        <img src="{{ media_url(m.file_url) }}" class="msg-image" onclick="window.open('{{ media_url(m.file_url) }}')">
                     {% elif m.msg_type == 'video' and m.file_url %}
-                        <video src="{{ url_for('static', filename=m.file_url) }}" class="msg-video" controls></video>
+                        <video src="{{ media_url(m.file_url) }}" class="msg-video" controls></video>
                     {% elif m.msg_type == 'file' and m.file_url %}
                         <div class="msg-bubble msg-file">
                             <div class="msg-file-icon"><svg class="icon"><use href="#i-file"/></svg></div>
                             <div class="msg-file-info"><div class="msg-file-name">{{ m.file_name or 'Файл' }}</div><div class="msg-file-size">{{ (m.file_size/1024)|round(0) }} КБ</div></div>
-                            <a href="{{ url_for('static', filename=m.file_url) }}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
+                            <a href="{{ media_url(m.file_url) }}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
                         </div>
                     {% else %}
                         <div class="msg-bubble">{{ m.content }}</div>
                     {% endif %}
-                    <div class="msg-time">{{ m.created_at | time_ago }}</div>
+                    <div class="msg-time">
+                        {{ m.created_at | time_ago }}
+                        {% if m.sender_id == cu.id %}
+                        <span class="msg-check {{ 'read' if m.is_read else 'unread' }}">
+                            {% if m.is_read %}
+                            <svg class="icon"><use href="#i-check"/></svg><svg class="icon" style="margin-left:-8px"><use href="#i-check"/></svg>
+                            {% else %}
+                            <svg class="icon"><use href="#i-check"/></svg>
+                            {% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if m.reactions %}
+                    <div class="msg-reactions">
+                        {% for r in m.reactions %}
+                        <span class="msg-reaction"><span class="reaction-emoji">{{ r.emoji }}</span><span class="reaction-count">{{ r.count }}</span></span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             {% else %}
@@ -85,6 +113,11 @@
                     <p>Начните диалог</p>
                 </div>
             {% endif %}
+        </div>
+
+        <div class="typing-indicator" id="typing-indicator">
+            <span class="typing-dots"><span></span><span></span><span></span></span>
+            <span>печатает...</span>
         </div>
 
         <div id="voice-recording-bar" class="voice-recording-bar hidden">
@@ -111,7 +144,7 @@
                     <svg class="icon"><use href="#i-mic"/></svg>
                 </button>
             </div>
-            <input id="chat-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
+            <input id="chat-input" placeholder="Сообщение..." oninput="notifyTyping({{ partner.id }})" onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
             <button class="btn btn-primary btn-icon-only" onclick="sendMessage({{ partner.id }})"><svg class="icon"><use href="#i-send"/></svg></button>
         </div>
         {% else %}

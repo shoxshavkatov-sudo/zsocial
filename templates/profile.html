@@ -9,14 +9,14 @@
 
     <div class="profile-cover">
         {% if is_own %}<input type="file" class="hidden" id="cover-input" accept="image/*" onchange="uploadCover(this)">{% endif %}
-        <img src="{{ url_for('static', filename=pu.cover) }}" alt="">
+        <img src="{{ media_url(pu.cover) }}" alt="">
     </div>
 
     <div class="profile-header">
         <div class="profile-avatar-row">
             <div class="profile-avatar-wrap">
                 {% if is_own %}<input type="file" class="hidden" id="avatar-input" accept="image/*" onchange="uploadAvatar(this)">{% endif %}
-                <img class="profile-avatar" src="{{ url_for('static', filename=pu.avatar) }}" alt="">
+                <img class="profile-avatar" src="{{ media_url(pu.avatar) }}" alt="">
             </div>
             <div class="profile-actions-row">
                 {% if is_own %}

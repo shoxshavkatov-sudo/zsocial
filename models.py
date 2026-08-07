@@ -125,6 +125,28 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporter_id INTEGER NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id INTEGER NOT NULL,
+        reason TEXT DEFAULT '',
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS message_reactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     ''')
 
     # Настройки по умолчанию
@@ -164,10 +186,22 @@ def migrate_db():
         'verified': 'INTEGER DEFAULT 0',
         'is_private': 'INTEGER DEFAULT 0',
         'banned': 'INTEGER DEFAULT 0',
+        'email_notifs': 'INTEGER DEFAULT 1',
+        'token_version': 'INTEGER DEFAULT 0',
     }
     for col, typedef in user_new.items():
         if col not in ucols:
             conn.execute(f'ALTER TABLE users ADD COLUMN {col} {typedef}')
+    # Проверяем колонки posts (parent_id для репостов, updated_at для правки)
+    pcols = [r[1] for r in conn.execute('PRAGMA table_info(posts)').fetchall()]
+    post_new = {
+        'parent_id': 'INTEGER REFERENCES posts(id) ON DELETE CASCADE',
+        'quote': 'TEXT DEFAULT ""',
+        'updated_at': 'TIMESTAMP',
+    }
+    for col, typedef in post_new.items():
+        if col not in pcols:
+            conn.execute(f'ALTER TABLE posts ADD COLUMN {col} {typedef}')
     # bookmarks таблица (если старая БД)
     tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
     if 'bookmarks' not in tables:
@@ -182,6 +216,28 @@ def migrate_db():
         )''')
     if 'settings' not in tables:
         conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
+    if 'reports' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reporter_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id INTEGER NOT NULL,
+            reason TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+    if 'message_reactions' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS message_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            emoji TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(message_id, user_id),
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
     conn.commit()
     conn.close()
 
@@ -206,15 +262,23 @@ def can_view_profile(viewer_id, profile_user):
 
 
 def render_text_content(text):
-    """Превращает #хештеги в кликабельные ссылки (HTML экранирование)."""
+    """Превращает #хештеги и @упоминания в кликабельные ссылки (HTML экранирование)."""
     import html
     import re
     escaped = html.escape(text or '')
-    return re.sub(
+    # @упоминания → ссылка на профиль
+    escaped = re.sub(
+        r'@([\w]{3,})',
+        r'<span class="mention" onclick="location.href=\'/profile/\1\'">@\1</span>',
+        escaped
+    )
+    # #хештеги → фильтр ленты
+    escaped = re.sub(
         r'#([\wа-яёА-ЯЁ]+)',
         r'<span class="hashtag" onclick="searchTag(\'\1\')">#\1</span>',
         escaped
     )
+    return escaped
 
 
 # ==================== МОДЕЛИ ====================
@@ -251,7 +315,7 @@ class User:
     @staticmethod
     def update(uid, **kw):
         db = get_db()
-        allowed = ['display_name', 'bio', 'status', 'avatar', 'cover', 'is_private']
+        allowed = ['display_name', 'bio', 'status', 'avatar', 'cover', 'is_private', 'email_notifs']
         sets, vals = [], []
         for k in allowed:
             if k in kw:
@@ -262,6 +326,27 @@ class User:
             db.execute(f'UPDATE users SET {", ".join(sets)} WHERE id = ?', vals)
             db.commit()
         return User.get(uid)
+
+    @staticmethod
+    def change_password(uid, new_password):
+        db = get_db()
+        db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
+                   (generate_password_hash(new_password), uid))
+        db.commit()
+
+    @staticmethod
+    def delete(uid):
+        db = get_db()
+        db.execute('DELETE FROM users WHERE id = ?', (uid,))
+        db.commit()
+
+    @staticmethod
+    def logout_everywhere(uid):
+        """Инкрементирует версию токена — инвалидирует все сессии."""
+        db = get_db()
+        db.execute('UPDATE users SET token_version = token_version + 1 WHERE id = ?', (uid,))
+        db.commit()
+        return User.get(uid)['token_version']
 
     @staticmethod
     def search(q):
@@ -336,6 +421,50 @@ class Post:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def edit(pid, uid, content, force=False):
+        db = get_db()
+        post = Post.get(pid)
+        if post and (post['user_id'] == uid or force):
+            db.execute('UPDATE posts SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (content, pid))
+            db.commit()
+            return Post.get(pid)
+        return None
+
+    @staticmethod
+    def search_content(q, limit=50):
+        db = get_db()
+        return db.execute(Post._feed_where('AND LOWER(p.content) LIKE ?'), (f'%{q.lower()}%',)).fetchall()[:limit]
+
+    @staticmethod
+    def repost(user_id, parent_id, quote=''):
+        db = get_db()
+        parent = db.execute('SELECT * FROM posts WHERE id = ?', (parent_id,)).fetchone()
+        if not parent:
+            return None
+        # Проверяем что ещё не репостили
+        existing = db.execute('SELECT id FROM posts WHERE user_id=? AND parent_id=?',
+                              (user_id, parent_id)).fetchone()
+        if existing:
+            return None  # уже репостили
+        content = quote or ''
+        db.execute('INSERT INTO posts (user_id, content, parent_id, quote) VALUES (?,?,?,?)',
+                   (user_id, content, parent_id, quote))
+        db.commit()
+        return db.execute('SELECT * FROM posts WHERE id = last_insert_rowid()').fetchone()
+
+    @staticmethod
+    def get_trending_tags(limit=10):
+        """Топ хештегов из всех постов (Python-парсинг)."""
+        db = get_db()
+        all_tags = {}
+        posts = db.execute('SELECT content FROM posts').fetchall()
+        import re
+        for p in posts:
+            for tag in re.findall(r'#([\wа-яёА-ЯЁ]+)', p['content'] or ''):
+                all_tags[tag] = all_tags.get(tag, 0) + 1
+        return sorted(all_tags.items(), key=lambda x: x[1], reverse=True)[:limit]
 
 
 class Like:
@@ -503,6 +632,56 @@ class Message:
         ''', (uid, uid, uid, uid, uid, uid, uid, uid, uid, uid)).fetchall()
         return rows
 
+    @staticmethod
+    def get(mid):
+        db = get_db()
+        return db.execute('SELECT * FROM messages WHERE id = ?', (mid,)).fetchone()
+
+    @staticmethod
+    def delete(mid, uid, force=False):
+        db = get_db()
+        m = Message.get(mid)
+        if m and (m['sender_id'] == uid or force):
+            db.execute('DELETE FROM messages WHERE id = ?', (mid,))
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def mark_one_read(mid):
+        db = get_db()
+        db.execute('UPDATE messages SET is_read=1 WHERE id = ?', (mid,))
+        db.commit()
+
+    @staticmethod
+    def toggle_reaction(mid, uid, emoji):
+        db = get_db()
+        ex = db.execute('SELECT * FROM message_reactions WHERE message_id=? AND user_id=?', (mid, uid)).fetchone()
+        if ex and ex['emoji'] == emoji:
+            db.execute('DELETE FROM message_reactions WHERE message_id=? AND user_id=?', (mid, uid))
+            db.commit()
+            return False
+        if ex:
+            db.execute('UPDATE message_reactions SET emoji=? WHERE message_id=? AND user_id=?', (emoji, mid, uid))
+        else:
+            db.execute('INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?,?,?)', (mid, uid, emoji))
+        db.commit()
+        return True
+
+    @staticmethod
+    def get_reactions(mid):
+        db = get_db()
+        return db.execute(
+            'SELECT emoji, COUNT(*) as cnt FROM message_reactions WHERE message_id=? GROUP BY emoji',
+            (mid,)
+        ).fetchall()
+
+    @staticmethod
+    def my_reaction(mid, uid):
+        db = get_db()
+        r = db.execute('SELECT emoji FROM message_reactions WHERE message_id=? AND user_id=?', (mid, uid)).fetchone()
+        return r['emoji'] if r else None
+
 
 class Notification:
     @staticmethod
@@ -532,6 +711,32 @@ class Notification:
     def mark_all_read(uid):
         db = get_db()
         db.execute('UPDATE notifications SET is_read=1 WHERE user_id=?', (uid,))
+        db.commit()
+
+
+class Report:
+    @staticmethod
+    def create(reporter_id, target_type, target_id, reason=''):
+        db = get_db()
+        db.execute('INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES (?,?,?,?)',
+                   (reporter_id, target_type, target_id, reason))
+        db.commit()
+
+    @staticmethod
+    def get_all(status=None):
+        db = get_db()
+        if status:
+            return db.execute('''SELECT r.*, u.username, u.display_name, u.avatar
+                FROM reports r JOIN users u ON r.reporter_id = u.id
+                WHERE r.status = ? ORDER BY r.created_at DESC''', (status,)).fetchall()
+        return db.execute('''SELECT r.*, u.username, u.display_name, u.avatar
+            FROM reports r JOIN users u ON r.reporter_id = u.id
+            ORDER BY r.created_at DESC''').fetchall()
+
+    @staticmethod
+    def resolve(rid, status='resolved'):
+        db = get_db()
+        db.execute('UPDATE reports SET status = ? WHERE id = ?', (status, rid))
         db.commit()
 
 

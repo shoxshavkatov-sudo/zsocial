@@ -6,7 +6,7 @@
     {% if notifications %}
         {% for n in notifications %}
         <div class="notif-item {% if not n.is_read %}unread{% endif %}">
-            <img src="{{ url_for('static', filename=n.avatar) }}" onclick="location.href='{{ url_for('profile', username=n.username) }}'">
+            <img src="{{ media_url(n.avatar) }}" onclick="location.href='{{ url_for('profile', username=n.username) }}'">
             <div class="notif-content">
                 <strong onclick="location.href='{{ url_for('profile', username=n.username) }}'">{{ n.display_name or n.username }}</strong>
                 {% if n.type == 'like' %}<span class="text-secondary"> оценил(а) вашу публикацию</span>{% endif %}

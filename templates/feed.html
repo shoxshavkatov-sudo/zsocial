@@ -13,9 +13,20 @@
         <button class="feed-tab {% if tab == 'following' %}active{% endif %}" onclick="location.href='{{ url_for('feed', tab='following') }}'">Подписки</button>
     </div>
 
+    {% if trending %}
+    <div class="trending-tags">
+        <div class="trending-title">Тренды</div>
+        <div class="trending-list">
+            {% for tag_name, tag_count in trending %}
+            <button class="trending-tag" onclick="location.href='{{ url_for('feed', tag=tag_name) }}'">#{{ tag_name }} <span class="trending-count">{{ tag_count }}</span></button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="composer">
         <div class="composer-inner">
-            <img src="{{ url_for('static', filename=cu.avatar) }}" class="avatar" alt="">
+            <img src="{{ media_url(cu.avatar) }}" class="avatar" alt="">
             <div class="composer-body">
                 <form method="POST" action="{{ url_for('create_post') }}" enctype="multipart/form-data" id="post-form">
                     <textarea name="content" placeholder="Что нового, {{ cu.username }}?" rows="2" maxlength="500" oninput="document.getElementById('cc').textContent=this.value.length"></textarea>

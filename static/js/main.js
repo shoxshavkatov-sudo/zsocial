@@ -120,7 +120,7 @@ function loadComments(pid) {
         .then(r => r.json())
         .then(list => {
             document.getElementById('comments-list-' + pid).innerHTML = list.map(c =>
-                '<div class="comment"><img src="/static/' + c.avatar + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + (c.verified ? ' <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>' : '') + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
+                '<div class="comment"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + (c.verified ? ' <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>' : '') + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
             ).join('');
         });
 }
@@ -136,7 +136,7 @@ function addComment(pid) {
             if (c.error) return flashToast(c.error);
             const list = document.getElementById('comments-list-' + pid);
             list.insertAdjacentHTML('beforeend',
-                '<div class="comment"><img src="/static/' + c.avatar + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
+                '<div class="comment"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
             );
             inp.value = '';
         });
@@ -176,7 +176,11 @@ function togglePostMenu(e, pid, userId) {
     const menu = document.createElement('div');
     menu.className = 'post-menu';
     let items = '';
-    if (isOwn) items += '<button class="danger" onclick="deleteOwnPost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-trash"/></svg> Удалить</button>';
+    if (isOwn) {
+        items += '<button onclick="editPost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-settings"/></svg> Изменить</button>';
+        items += '<button class="danger" onclick="deleteOwnPost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-trash"/></svg> Удалить</button>';
+    }
+    items += '<button onclick="doRepost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-share"/></svg> Поделиться в ленту</button>';
     items += '<button onclick="copyLink(' + pid + ')"><svg class="icon icon-sm"><use href="#i-share"/></svg> Копировать ссылку</button>';
     if (!isOwn) items += '<button class="danger" onclick="reportPost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-flag"/></svg> Пожаловаться</button>';
     if (isAdmin && !isOwn) items += '<button class="danger" onclick="deleteOwnPost(' + pid + ')"><svg class="icon icon-sm"><use href="#i-trash"/></svg> Удалить (админ)</button>';
@@ -185,6 +189,18 @@ function togglePostMenu(e, pid, userId) {
     const rect = e.currentTarget.getBoundingClientRect();
     menu.style.top = (rect.bottom + 4) + 'px';
     menu.style.right = (window.innerWidth - rect.right) + 'px';
+}
+function editPost(pid) {
+    closeAllMenus();
+    location.href = '/post/' + pid + '/edit';
+}
+function doRepost(pid) {
+    closeAllMenus();
+    const quote = prompt('Добавить комментарий к репосту (необязательно):');
+    if (quote === null) return;
+    fetch('/post/' + pid + '/repost', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({quote: quote}) })
+        .then(r => r.json()).then(d => { if (d.error) return flashToast(d.error); flashToast('Поделились!'); })
+        .catch(() => flashToast('Ошибка'));
 }
 function closeAllMenus() {
     document.querySelectorAll('.post-menu').forEach(m => m.remove());
@@ -199,9 +215,30 @@ function deleteOwnPost(pid) {
             flashToast('Удалено');
         });
 }
-function copyLink(pid) { flashToast('Ссылка скопирована'); }
-function reportPost(pid) { flashToast('Жалоба отправлена'); }
-function sharePost(pid) { flashToast('Ссылка скопирована'); }
+function copyLink(pid) {
+    const url = location.origin + '/feed#' + pid;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => flashToast('Ссылка скопирована')).catch(() => flashToast('Ошибка копирования'));
+    } else {
+        const ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); ta.remove(); flashToast('Ссылка скопирована');
+    }
+}
+function reportPost(pid) {
+    const reason = prompt('Укажите причину жалобы (необязательно):');
+    if (reason === null) return;
+    fetch('/report', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({target_type:'post', target_id:pid, reason:reason||''}) })
+        .then(r => r.json()).then(d => { if (d.error) return flashToast(d.error); flashToast('Жалоба отправлена'); })
+        .catch(() => flashToast('Ошибка'));
+}
+function sharePost(pid) {
+    const url = location.origin + '/feed#' + pid;
+    if (navigator.share) {
+        navigator.share({ title: document.title, url: url }).catch(() => {});
+    } else {
+        copyLink(pid);
+    }
+}
 
 // ===== ХЕШТЕГИ =====
 function searchTag(tag) {
@@ -229,19 +266,107 @@ function adminRole(uid) {
         .then(r => r.json())
         .then(d => { if (!d.error) location.reload(); });
 }
+function adminResolveReport(rid) {
+    fetch('/admin/report/' + rid + '/resolve', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => { if (!d.error) { const row = document.getElementById('report-' + rid); if (row) row.remove(); flashToast('Жалоба закрыта'); } });
+}
+function adminDeletePost(pid, rid) {
+    fetch('/admin/post/' + pid + '/delete', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => { if (!d.error) { if (rid) adminResolveReport(rid); flashToast('Пост удалён'); } });
+}
 
 // ===== ЧАТ (WebSocket) =====
 let chatSocket = null;
+let typingTimer = null;
+let isTyping = false;
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
 function initSocket(myId, partnerId) {
     if (typeof io === 'undefined') return;
     chatSocket = io();
+
     chatSocket.on('new_message', (data) => {
         if (data.sender_id !== partnerId && data.receiver_id !== partnerId) return;
         const container = document.getElementById('chat-messages');
         if (!container) return;
+        // скрываем индикатор печати когда пришло сообщение
+        hideTyping();
         appendMessage(container, data, myId);
         container.scrollTop = container.scrollHeight;
     });
+
+    // Индикатор «печатает»
+    chatSocket.on('typing', (d) => { if (d.from === partnerId) showTyping(); });
+    chatSocket.on('stop_typing', (d) => { if (d.from === partnerId) hideTyping(); });
+
+    // Удаление сообщения
+    chatSocket.on('message_deleted', (d) => {
+        const el = document.getElementById('msg-' + d.id);
+        if (el) el.remove();
+    });
+
+    // Реакции
+    chatSocket.on('message_reaction', (d) => renderReactions(d.id, d.reactions));
+}
+
+function showTyping() {
+    const t = document.getElementById('typing-indicator');
+    if (t) t.classList.add('visible');
+}
+function hideTyping() {
+    const t = document.getElementById('typing-indicator');
+    if (t) t.classList.remove('visible');
+}
+
+// Отправка индикатора печати при вводе
+function notifyTyping(partnerId) {
+    if (!chatSocket) return;
+    if (!isTyping) {
+        isTyping = true;
+        chatSocket.emit('typing', { to: partnerId });
+    }
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+        isTyping = false;
+        chatSocket.emit('stop_typing', { to: partnerId });
+    }, 2000);
+}
+
+// Удаление сообщения
+function deleteMsg(mid) {
+    if (!confirm('Удалить сообщение?')) return;
+    fetch('/chat/' + mid + '/delete', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => { if (d.error) flashToast(d.error); });
+}
+
+// Реакции
+function showReactionPicker(mid, e) {
+    e.stopPropagation();
+    document.querySelectorAll('.reaction-picker').forEach(p => p.remove());
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker';
+    picker.innerHTML = REACTION_EMOJIS.map(em => `<button onclick="toggleReaction(${mid}, '${em}')">${em}</button>`).join('');
+    document.body.appendChild(picker);
+    const rect = e.currentTarget.getBoundingClientRect();
+    picker.style.top = (rect.top - 40) + 'px';
+    picker.style.left = rect.left + 'px';
+    setTimeout(() => document.addEventListener('click', () => picker.remove(), { once: true }), 10);
+}
+function toggleReaction(mid, emoji) {
+    document.querySelectorAll('.reaction-picker').forEach(p => p.remove());
+    fetch('/chat/' + mid + '/react', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({emoji}) })
+        .then(r => r.json()).then(d => { if (d.error) flashToast(d.error); });
+}
+function renderReactions(mid, reactions) {
+    const msg = document.getElementById('msg-' + mid);
+    if (!msg) return;
+    let bar = msg.querySelector('.msg-reactions');
+    if (!reactions || reactions.length === 0) { if (bar) bar.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.className = 'msg-reactions'; msg.appendChild(bar); }
+    bar.innerHTML = reactions.map(r => `<span class="msg-reaction"><span class="reaction-emoji">${r.emoji}</span><span class="reaction-count">${r.count}</span></span>`).join('');
 }
 
 function renderMessageHTML(data, isMine) {

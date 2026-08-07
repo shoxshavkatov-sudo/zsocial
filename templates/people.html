@@ -2,37 +2,86 @@
 {% block title %}Поиск · {{ site_name }}{% endblock %}
 {% block body %}
 <div class="main-content">
-    <div class="page-header"><h1>Поиск людей</h1></div>
-    <form method="GET" style="padding:12px 16px;border-bottom:1px solid var(--border)">
+    <div class="page-header"><h1>Поиск</h1></div>
+    <form method="GET" id="search-form" style="padding:12px 16px;border-bottom:1px solid var(--border)">
         <div style="position:relative">
             <svg class="icon" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)"><use href="#i-search"/></svg>
-            <input class="input" name="q" value="{{ q }}" placeholder="Поиск по имени или @username..." style="padding-left:38px">
+            <input class="input" name="q" value="{{ q }}" placeholder="Поиск..." style="padding-left:38px" oninput="syncTabs(this.value)">
+            <input type="hidden" name="tab" id="search-tab" value="{{ tab }}">
         </div>
     </form>
-    {% if users %}
-        {% for u in users %}
-        <div class="person-row">
-            <img src="{{ url_for('static', filename=u.avatar) }}" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
-            <div class="person-info" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
-                <div class="name">{{ u.display_name or u.username }} {% if u.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %} {% if u.role == 'admin' %}<span class="badge badge-admin">ADMIN</span>{% endif %}</div>
-                <div class="handle">@{{ u.username }}</div>
-                {% if u.bio %}<div class="bio">{{ u.bio[:60] }}{% if u.bio|length > 60 %}...{% endif %}</div>{% endif %}
+
+    {% if q %}
+    <div class="feed-tabs">
+        <button class="feed-tab {% if tab != 'posts' %}active{% endif %}" onclick="setTab('users')">Люди</button>
+        <button class="feed-tab {% if tab == 'posts' %}active{% endif %}" onclick="setTab('posts')">Посты</button>
+    </div>
+    {% endif %}
+
+    {% if not q %}
+        {% if users %}
+            {% for u in users %}
+            <div class="person-row">
+                <img src="{{ media_url(u.avatar) }}" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
+                <div class="person-info" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
+                    <div class="name">{{ u.display_name or u.username }} {% if u.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %} {% if u.role == 'admin' %}<span class="badge badge-admin">ADMIN</span>{% endif %}</div>
+                    <div class="handle">@{{ u.username }}</div>
+                    {% if u.bio %}<div class="bio">{{ u.bio[:60] }}{% if u.bio|length > 60 %}...{% endif %}</div>{% endif %}
+                </div>
+                <div class="person-actions">
+                    {% if u.id != cu.id %}
+                    <button class="btn {% if u.id in following_ids %}btn-outline{% else %}btn-primary{% endif %} btn-sm" onclick="event.stopPropagation();toggleFollowFromList({{ u.id }}, this)">
+                        {% if u.id in following_ids %}Читаю{% else %}Читать{% endif %}
+                    </button>
+                    {% endif %}
+                </div>
             </div>
-            <div class="person-actions">
-                {% if u.id != cu.id %}
-                <button class="btn {% if u.id in following_ids %}btn-outline{% else %}btn-primary{% endif %} btn-sm" onclick="event.stopPropagation();toggleFollowFromList({{ u.id }}, this)">
-                    {% if u.id in following_ids %}Читаю{% else %}Читать{% endif %}
-                </button>
-                {% endif %}
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <svg class="icon empty-icon"><use href="#i-search"/></svg>
+                <h3>Нет пользователей</h3>
             </div>
-        </div>
-        {% endfor %}
+        {% endif %}
+    {% elif tab == 'posts' %}
+        {% if posts %}
+            {% include '_posts.html' %}
+        {% else %}
+            <div class="empty-state">
+                <svg class="icon empty-icon"><use href="#i-search"/></svg>
+                <h3>Постов не найдено</h3>
+                <p>Попробуйте другой запрос</p>
+            </div>
+        {% endif %}
     {% else %}
-        <div class="empty-state">
-            <svg class="icon empty-icon"><use href="#i-search"/></svg>
-            <h3>Никого не найдено</h3>
-            <p>Попробуйте другой запрос</p>
-        </div>
+        {% if users %}
+            {% for u in users %}
+            <div class="person-row">
+                <img src="{{ media_url(u.avatar) }}" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
+                <div class="person-info" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
+                    <div class="name">{{ u.display_name or u.username }} {% if u.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %} {% if u.role == 'admin' %}<span class="badge badge-admin">ADMIN</span>{% endif %}</div>
+                    <div class="handle">@{{ u.username }}</div>
+                    {% if u.bio %}<div class="bio">{{ u.bio[:60] }}{% if u.bio|length > 60 %}...{% endif %}</div>{% endif %}
+                </div>
+                <div class="person-actions">
+                    {% if u.id != cu.id %}
+                    <button class="btn {% if u.id in following_ids %}btn-outline{% else %}btn-primary{% endif %} btn-sm" onclick="event.stopPropagation();toggleFollowFromList({{ u.id }}, this)">
+                        {% if u.id in following_ids %}Читаю{% else %}Читать{% endif %}
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <svg class="icon empty-icon"><use href="#i-search"/></svg>
+                <h3>Никого не найдено</h3>
+                <p>Попробуйте другой запрос</p>
+            </div>
+        {% endif %}
     {% endif %}
 </div>
+<script>
+function setTab(t){ document.getElementById('search-tab').value = t; document.getElementById('search-form').submit(); }
+</script>
 {% endblock %}
