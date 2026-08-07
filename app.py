@@ -31,6 +31,19 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async)
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 app.teardown_appcontext(close_db)
 
+# Версия приложения — для cache-busting статики (каждый деплой = новый хэш)
+APP_VERSION = os.environ.get('RENDER_GIT_COMMIT', 'dev')[:8] or str(int(__import__('time').time()))
+
+
+@app.after_request
+def no_cache_dynamic(resp):
+    """Запрещаем кэширование HTML страниц — чтобы после деплоя был свежий контент."""
+    if 'text/html' in (resp.headers.get('Content-Type') or ''):
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+    return resp
+
 
 def _seed_if_empty():
     """Создаёт демо-пользователей при первом запуске."""
@@ -159,7 +172,14 @@ def inject_globals():
     return dict(cu=u, unread_notifs=notifs, unread_msgs=msgs,
                 site_name=site.get('site_name', 'ZSocial'),
                 site_desc=site.get('site_desc', ''),
-                site=site)
+                site=site,
+                v=APP_VERSION)
+
+
+@app.context_processor
+def inject_app_version():
+    """Версия для cache-busting статики (v=... в URL)."""
+    return dict(APP_VERSION=APP_VERSION)
 
 
 # ==================== АВТОРИЗАЦИЯ ====================

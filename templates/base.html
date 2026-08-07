@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{% block title %}ZSocial{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ APP_VERSION }}">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f172a'/><text x='16' y='23' font-size='18' fill='white' text-anchor='middle' font-family='Arial' font-weight='800'>Z</text></svg>">
 </head>
 <body data-user-id="{{ cu.id if cu else '' }}" data-is-admin="{{ '1' if cu and cu.role == 'admin' else '0' }}">
@@ -105,7 +105,7 @@
 {% endif %}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v={{ APP_VERSION }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
