@@ -500,7 +500,7 @@ class Message:
             ) AS convos
             JOIN users u ON u.id = convos.other_id
             ORDER BY convos.max_time DESC
-        ''', (uid, uid, uid, uid, uid, uid, uid, uid, uid)).fetchall()
+        ''', (uid, uid, uid, uid, uid, uid, uid, uid, uid, uid)).fetchall()
         return rows
 
 

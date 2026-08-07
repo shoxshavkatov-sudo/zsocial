@@ -444,7 +444,7 @@ img.avatar, .post-head img.avatar, .composer-inner img.avatar { background: var(
 
 /* Кнопки lower bar — эффект сжатия при нажатии + плавность */
 .bottombar-item {
-    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.25s, border-color 0.25s, color 0.15s;
 }
 .bottombar-item.active {
     animation: scaleIn 0.3s ease;
@@ -477,9 +477,13 @@ img.avatar, .profile-avatar, .bottombar-avatar { transition: transform 0.25s; }
 .toggle { transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 .toggle::after { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-/* Тема — плавный переход */
-*, *::before, *::after { transition: background-color 0.25s, border-color 0.25s, color 0.15s; }
-/* (но не transform/opacity — они управляются отдельно) */
+/* Тема — плавный переход (только для theme toggle, без wildcard * чтобы не сломать layout) */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+    transition: background-color 0.25s, border-color 0.25s, color 0.15s !important;
+}
 
 /* Сообщение в чате — плавное появление */
 .msg { animation: slideUp 0.3s ease; }
