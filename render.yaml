@@ -1,0 +1,16 @@
+# Render Blueprint — автоматический деплой ZSocial
+# Создаст бесплатный веб-сервис из этого репозитория
+services:
+  - type: web
+    name: zsocial
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class gevent --workers 1 --bind 0.0.0.0:$PORT --worker-connections 1000 wsgi:application
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.9
+    healthCheckPath: /
+    autoDeploy: true

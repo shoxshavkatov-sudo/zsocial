@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}Сообщения · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="chat-page {% if partner %}show-window{% endif %}" id="chat-page">
+    <div class="chat-list-panel">
+        <div class="chat-list-header"><h2>Сообщения</h2></div>
+        <div class="chat-list">
+            {% if dialogs %}
+                {% for d in dialogs %}
+                <button class="chat-list-item {% if partner and partner.id == d.other_id %}active{% endif %}" onclick="location.href='{{ url_for('chat', with=d.username) }}'">
+                    <img src="{{ url_for('static', filename=d.avatar) }}">
+                    <div class="chat-list-info">
+                        <div class="chat-list-top">
+                            <span class="name">{{ d.display_name or d.username }} {% if d.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</span>
+                            <span class="time">{{ d.last_time | time_ago }}</span>
+                        </div>
+                        <div class="chat-list-bottom">
+                            <span class="preview">{{ (d.last_msg or '')[:40] }}</span>
+                            {% if d.unread %}<span class="unread">{{ d.unread }}</span>{% endif %}
+                        </div>
+                    </div>
+                </button>
+                {% endfor %}
+            {% else %}
+                <div style="padding:40px 20px;text-align:center;color:var(--text-muted)">
+                    <svg class="icon icon-xl" style="margin-bottom:12px"><use href="#i-chat"/></svg>
+                    <p>Нет диалогов</p>
+                    <button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="location.href='{{ url_for('people') }}'">Начать</button>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="chat-window">
+        {% if partner %}
+        <div class="chat-window-head">
+            <button class="btn btn-ghost btn-icon-only" onclick="location.href='{{ url_for('chat') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+            <img src="{{ url_for('static', filename=partner.avatar) }}" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
+            <div class="info" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
+                <strong>{{ partner.display_name or partner.username }} {% if partner.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</strong>
+                <span>@{{ partner.username }}</span>
+            </div>
+        </div>
+        <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
+            {% if messages %}
+                {% for m in messages %}
+                <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %}">
+                    <div class="msg-bubble">{{ m.content }}</div>
+                    <div class="msg-time">{{ m.created_at | time_ago }}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="text-align:center;color:var(--text-muted);margin:auto">
+                    <svg class="icon icon-xl" style="margin-bottom:8px"><use href="#i-send"/></svg>
+                    <p>Начните диалог</p>
+                </div>
+            {% endif %}
+        </div>
+        <div class="chat-input-area">
+            <input id="chat-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
+            <button class="btn btn-primary btn-icon-only" onclick="sendMessage({{ partner.id }})"><svg class="icon"><use href="#i-send"/></svg></button>
+        </div>
+        {% else %}
+        <div class="chat-placeholder">
+            <svg class="icon"><use href="#i-chat"/></svg>
+            <h3 style="font-size:17px;font-weight:600;margin-bottom:6px">Выберите диалог</h3>
+            <p>или начните новый со страницы «Поиск»</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% if partner %}
+<script>
+    setTimeout(() => {
+        const c = document.getElementById('chat-messages');
+        if (c) c.scrollTop = c.scrollHeight;
+        initSocket({{ cu.id }}, {{ partner.id }});
+    }, 50);
+</script>
+{% endif %}
+{% endblock %}

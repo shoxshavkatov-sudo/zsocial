@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}{{ code }} · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="empty-state">
+        <div style="font-size:64px;font-weight:800;color:var(--border-strong);margin-bottom:8px">{{ code }}</div>
+        <h3>{{ message }}</h3>
+        <button class="btn btn-primary" onclick="location.href='{{ url_for('feed') }}'">На главную</button>
+    </div>
+</div>
+{% endblock %}

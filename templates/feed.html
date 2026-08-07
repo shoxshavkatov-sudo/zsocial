@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Лента · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="page-header">
+        <h1>{% if tag %}Хештег #{{ tag }}{% else %}Лента{% endif %}</h1>
+        {% if tag %}<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="location.href='{{ url_for('feed') }}'">Сбросить</button>{% endif %}
+    </div>
+
+    {% if not tag %}
+    <div class="feed-tabs">
+        <button class="feed-tab {% if tab != 'following' %}active{% endif %}" onclick="location.href='{{ url_for('feed') }}'">Все посты</button>
+        <button class="feed-tab {% if tab == 'following' %}active{% endif %}" onclick="location.href='{{ url_for('feed', tab='following') }}'">Подписки</button>
+    </div>
+
+    <div class="composer">
+        <div class="composer-inner">
+            <img src="{{ url_for('static', filename=cu.avatar) }}" class="avatar" alt="">
+            <div class="composer-body">
+                <form method="POST" action="{{ url_for('create_post') }}" enctype="multipart/form-data" id="post-form">
+                    <textarea name="content" placeholder="Что нового, {{ cu.username }}?" rows="2" maxlength="500" oninput="document.getElementById('cc').textContent=this.value.length"></textarea>
+                    <div id="img-preview" class="composer-img-preview"></div>
+                    <div class="composer-actions">
+                        <div class="composer-tools">
+                            <label class="composer-tool">
+                                <svg class="icon"><use href="#i-image"/></svg>
+                                <input type="file" name="image" accept="image/*" onchange="previewImg(this)">
+                            </label>
+                        </div>
+                        <div style="display:flex;align-items:center">
+                            <span class="composer-counter"><span id="cc">0</span>/500</span>
+                            <button type="submit" class="btn btn-primary">Опубликовать</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="posts">
+        {% if posts %}
+            {% include '_posts.html' %}
+        {% else %}
+            <div class="empty-state">
+                <svg class="icon empty-icon"><use href="#i-chat"/></svg>
+                <h3>Здесь пусто</h3>
+                <p>{% if tab == 'following' %}Подпишитесь на людей{% else %}Создайте первый пост{% endif %}</p>
+                <button class="btn btn-primary" onclick="location.href='{{ url_for('people') }}'">Найти людей</button>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

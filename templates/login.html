@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Вход · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="logo-mark">Z</div>
+            <div class="logo-name">{{ site_name }}</div>
+        </div>
+        <h1>С возвращением</h1>
+        <p class="auth-sub">Войдите в свой аккаунт</p>
+        <form method="POST">
+            <div class="form-field">
+                <label>Имя пользователя или email</label>
+                <input class="input" name="login" placeholder="username" required autofocus>
+            </div>
+            <div class="form-field">
+                <label>Пароль</label>
+                <input class="input" type="password" name="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Войти</button>
+        </form>
+        <div class="auth-switch">Нет аккаунта? <button onclick="window.location='{{ url_for('register') }}'">Регистрация</button></div>
+        <div style="background:var(--bg-muted);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text-secondary);margin-top:16px">
+            <strong>Демо:</strong> admin / admin &nbsp;·&nbsp; a_karimova / 123456
+        </div>
+    </div>
+</div>
+{% endblock %}

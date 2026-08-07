@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}{{ pu.display_name or pu.username }} · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="page-header">
+        <button class="back-btn" onclick="location.href='{{ url_for('feed') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <div><h1>{{ pu.display_name or pu.username }}</h1><div class="header-meta">{{ posts|length }} публикаций</div></div>
+    </div>
+
+    <div class="profile-cover">
+        {% if is_own %}<input type="file" class="hidden" id="cover-input" accept="image/*" onchange="uploadCover(this)">{% endif %}
+        <img src="{{ url_for('static', filename=pu.cover) }}" alt="">
+    </div>
+
+    <div class="profile-header">
+        <div class="profile-avatar-row">
+            <div class="profile-avatar-wrap">
+                {% if is_own %}<input type="file" class="hidden" id="avatar-input" accept="image/*" onchange="uploadAvatar(this)">{% endif %}
+                <img class="profile-avatar" src="{{ url_for('static', filename=pu.avatar) }}" alt="">
+            </div>
+            <div class="profile-actions-row">
+                {% if is_own %}
+                    <button class="btn btn-outline" onclick="location.href='{{ url_for('settings') }}'"><svg class="icon icon-sm"><use href="#i-settings"/></svg> Редактировать</button>
+                {% else %}
+                    <button class="btn {% if is_following %}btn-outline{% else %}btn-primary{% endif %}" id="follow-btn" onclick="toggleFollow({{ pu.id }}, this)">
+                        {% if is_following %}Вы подписаны{% else %}Подписаться{% endif %}
+                    </button>
+                    {% if not pu.banned %}
+                    <button class="btn btn-outline" onclick="location.href='{{ url_for('chat', with=pu.username) }}'"><svg class="icon icon-sm"><use href="#i-chat"/></svg></button>
+                    {% endif %}
+                {% endif %}
+                {% if cu.role == 'admin' and not is_own %}
+                    <button class="btn {% if pu.banned %}btn-outline{% else %}btn-danger-outline{% endif %} btn-sm" onclick="adminBan({{ pu.id }})">{% if pu.banned %}Разбан{% else %}Бан{% endif %}</button>
+                    <button class="btn btn-ghost btn-sm" onclick="adminVerify({{ pu.id }})">{% if pu.verified %}Снять ✓{% else %}✓{% endif %}</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="profile-name">
+            {{ pu.display_name or pu.username }}
+            {% if pu.verified %}<svg class="icon verified-mark"><use href="#i-check-badge"/></svg>{% endif %}
+            {% if pu.role == 'admin' %}<span class="badge badge-admin">ADMIN</span>{% endif %}
+            {% if pu.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
+        </div>
+        <div class="profile-handle">@{{ pu.username }}</div>
+
+        {% if can_view %}
+            {% if pu.bio %}<div class="profile-bio">{{ pu.bio }}</div>{% endif %}
+            {% if pu.status %}<div class="profile-meta"><span><svg class="icon icon-sm"><use href="#i-user"/></svg> {{ pu.status }}</span></div>{% endif %}
+            <div class="profile-meta">
+                <span><svg class="icon icon-sm"><use href="#i-calendar"/></svg> с {{ pu.created_at[:7] if pu.created_at else '' }}</span>
+                {% if pu.is_private %}<span><svg class="icon icon-sm"><use href="#i-lock"/></svg> Приватный</span>{% else %}<span><svg class="icon icon-sm"><use href="#i-globe"/></svg> Публичный</span>{% endif %}
+            </div>
+            <div class="profile-stats-row">
+                <div class="profile-stat"><strong>{{ following_count }}</strong><span>подписок</span></div>
+                <div class="profile-stat"><strong id="followers-count">{{ followers_count }}</strong><span>подписчиков</span></div>
+                <div class="profile-stat"><strong>{{ posts|length }}</strong><span>публикаций</span></div>
+            </div>
+            {% if posts %}
+                {% include '_posts.html' %}
+            {% else %}
+                <div class="empty-state">
+                    <svg class="icon empty-icon"><use href="#i-image"/></svg>
+                    <h3>Нет публикаций</h3>
+                    <p>{% if is_own %}Поделитесь чем-нибудь{% else %}Здесь пока пусто{% endif %}</p>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="profile-private-notice">
+                <svg class="icon"><use href="#i-lock"/></svg>
+                <h3 style="font-size:17px;font-weight:600;margin-bottom:6px">Это приватный аккаунт</h3>
+                <p style="font-size:14px;color:var(--text-secondary)">Подпишитесь, чтобы видеть публикации @{{ pu.username }}.</p>
+                {% if not is_following %}<button class="btn btn-primary" style="margin-top:16px" onclick="toggleFollow({{ pu.id }}, document.getElementById('follow-btn'))" id="follow-btn-2">Подписаться</button>{% endif %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

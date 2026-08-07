@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Уведомления · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="page-header"><h1>Уведомления</h1></div>
+    {% if notifications %}
+        {% for n in notifications %}
+        <div class="notif-item {% if not n.is_read %}unread{% endif %}">
+            <img src="{{ url_for('static', filename=n.avatar) }}" onclick="location.href='{{ url_for('profile', username=n.username) }}'">
+            <div class="notif-content">
+                <strong onclick="location.href='{{ url_for('profile', username=n.username) }}'">{{ n.display_name or n.username }}</strong>
+                {% if n.type == 'like' %}<span class="text-secondary"> оценил(а) вашу публикацию</span>{% endif %}
+                {% if n.type == 'comment' %}<span class="text-secondary"> прокомментировал(а) вашу публикацию</span>{% endif %}
+                {% if n.type == 'follow' %}<span class="text-secondary"> подписался(ась) на вас</span>{% endif %}
+            </div>
+            <div class="notif-icon-wrap {% if n.type == 'like' %}like{% elif n.type == 'comment' %}comment{% else %}follow{% endif %}">
+                <svg class="icon icon-sm"><use href="#i-{{ 'heart' if n.type == 'like' else ('comment' if n.type == 'comment' else 'user') }}"/></svg>
+            </div>
+            <div class="notif-time">{{ n.created_at | time_ago }}</div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <svg class="icon empty-icon"><use href="#i-bell"/></svg>
+            <h3>Нет уведомлений</h3>
+            <p>Здесь появятся лайки, комментарии и подписки.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{# Переиспользуемый список постов. Переменные: posts, liked_posts, saved_posts, cu #}
+{% for post in posts %}
+<div class="post" id="post-{{ post.id }}">
+    <div class="post-head">
+        <img src="{{ url_for('static', filename=post.avatar) }}" class="avatar" onclick="location.href='{{ url_for('profile', username=post.username) }}'">
+        <div class="post-head-meta">
+            <div class="post-author-line">
+                <span class="post-author-name" onclick="location.href='{{ url_for('profile', username=post.username) }}'">{{ post.display_name or post.username }}</span>
+                {% if post.verified %}<svg class="icon icon-sm verified-mark" title="Подтверждён"><use href="#i-check-badge"/></svg>{% endif %}
+                <span class="post-author-handle">@{{ post.username }}</span>
+                <span class="post-time">{{ post.created_at | time_ago }}</span>
+            </div>
+        </div>
+        <button class="post-menu-btn" onclick="togglePostMenu(event, {{ post.id }}, {{ post.user_id }})"><svg class="icon"><use href="#i-more"/></svg></button>
+    </div>
+    {% if post.content %}<div class="post-body">{{ post.content | render_text | safe }}</div>{% endif %}
+    {% if post.image %}
+    <div class="post-image-wrap"><img src="{{ url_for('static', filename=post.image) }}" onclick="window.open('{{ url_for('static', filename=post.image) }}')"></div>
+    {% endif %}
+    {% if post.like_count > 0 or post.comment_count > 0 %}
+    <div class="post-stats">
+        <span class="text-sm text-muted">{% if post.like_count > 0 %}{{ post.like_count }} отметок{% endif %}{% if post.like_count > 0 and post.comment_count > 0 %} · {% endif %}{% if post.comment_count > 0 %}{{ post.comment_count }} комментариев{% endif %}</span>
+    </div>
+    {% endif %}
+    <div class="post-actions">
+        <button class="post-action {% if post.id in liked_posts %}liked{% endif %}" onclick="toggleLike({{ post.id }}, this)">
+            <svg class="icon"><use href="#i-heart"/></svg>
+        </button>
+        <button class="post-action" onclick="toggleComments({{ post.id }})">
+            <svg class="icon"><use href="#i-comment"/></svg>
+        </button>
+        <button class="post-action {% if post.id in saved_posts %}saved{% endif %}" onclick="toggleBookmark({{ post.id }}, this)">
+            <svg class="icon"><use href="#i-bookmark"/></svg>
+        </button>
+        <button class="post-action" onclick="sharePost({{ post.id }})">
+            <svg class="icon"><use href="#i-share"/></svg>
+        </button>
+    </div>
+    <div class="comments-section hidden" id="comments-{{ post.id }}">
+        <div id="comments-list-{{ post.id }}"></div>
+        <div class="comment-input-row">
+            <img src="{{ url_for('static', filename=cu.avatar) }}">
+            <input type="text" placeholder="Комментарий..." id="cinput-{{ post.id }}" onkeypress="if(event.key==='Enter')addComment({{ post.id }})">
+        </div>
+    </div>
+</div>
+{% endfor %}

@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Регистрация · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="logo-mark">Z</div>
+            <div class="logo-name">{{ site_name }}</div>
+        </div>
+        <h1>Создать аккаунт</h1>
+        <p class="auth-sub">Присоединяйтесь к профессиональной сети</p>
+        <form method="POST">
+            <div class="form-field">
+                <label>Имя пользователя</label>
+                <input class="input" name="username" required minlength="3" placeholder="username" autofocus>
+                <div class="hint">Латинские буквы и цифры, минимум 3 символа</div>
+            </div>
+            <div class="form-field">
+                <label>Email</label>
+                <input class="input" type="email" name="email" required placeholder="you@example.com">
+            </div>
+            <div class="form-field">
+                <label>Пароль</label>
+                <input class="input" type="password" name="password" required minlength="6" placeholder="••••••••">
+            </div>
+            <div class="form-field">
+                <label>Подтвердите пароль</label>
+                <input class="input" type="password" name="confirm" required placeholder="••••••••">
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Создать аккаунт</button>
+        </form>
+        <div class="auth-switch">Уже есть аккаунт? <button onclick="window.location='{{ url_for('login') }}'">Войти</button></div>
+    </div>
+</div>
+{% endblock %}

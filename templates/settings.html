@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Настройки · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="main-content">
+    <div class="page-header">
+        <button class="back-btn" onclick="location.href='{{ url_for('profile', username=cu.username) }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <h1>Настройки</h1>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="settings-section">
+            <h2>Профиль</h2>
+            <p class="section-desc">Управляйте публичной информацией.</p>
+
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Аватар</div><div class="desc">Рекомендуется квадрат 400×400.</div></div>
+                <label class="btn btn-outline btn-sm"><svg class="icon icon-sm"><use href="#i-camera"/></svg> Изменить<input type="file" name="avatar" accept="image/*" class="hidden" onchange="previewAvatar(this)"></label>
+            </div>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Обложка</div><div class="desc">Широкое изображение сверху профиля.</div></div>
+                <label class="btn btn-outline btn-sm"><svg class="icon icon-sm"><use href="#i-image"/></svg> Изменить<input type="file" name="cover" accept="image/*" class="hidden" onchange="previewCover(this)"></label>
+            </div>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Отображаемое имя</div></div>
+                <input class="input" type="text" name="display_name" value="{{ cu.display_name or '' }}" placeholder="Как вас называть?" maxlength="50">
+            </div>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Статус</div></div>
+                <input class="input" type="text" name="status" value="{{ cu.status or '' }}" placeholder="Напр: Работаю над проектом" maxlength="100">
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:stretch">
+                <div class="settings-row-info"><div class="label">О себе</div><div class="desc">Расскажите о себе.</div></div>
+                <textarea class="input" name="bio" rows="3" placeholder="Bio" maxlength="300">{{ cu.bio or '' }}</textarea>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2>Приватность</h2>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Приватный профиль</div><div class="desc">Только подписчики видят ваши публикации.</div></div>
+                <label class="toggle {% if cu.is_private %}on{% endif %}" id="private-toggle" onclick="this.classList.toggle('on')"></label>
+                <input type="hidden" name="is_private" id="is-private-input" value="{% if cu.is_private %}1{% endif %}">
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2>Оформление</h2>
+            <div class="settings-row">
+                <div class="settings-row-info"><div class="label">Тема</div><div class="desc">Светлая или тёмная.</div></div>
+                <div style="display:flex;gap:6px">
+                    <button type="button" class="btn btn-sm theme-btn" data-theme="light">Светлая</button>
+                    <button type="button" class="btn btn-sm theme-btn" data-theme="dark">Тёмная</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+            <button type="button" class="btn btn-ghost" onclick="location.href='{{ url_for('profile', username=cu.username) }}'">Отмена</button>
+            <button type="button" class="btn btn-danger-outline" style="margin-left:auto" onclick="if(confirm('Выйти?'))location.href='{{ url_for('logout') }}'"><svg class="icon icon-sm"><use href="#i-log-out"/></svg> Выйти</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
