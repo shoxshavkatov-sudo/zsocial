@@ -239,14 +239,50 @@ function initSocket(myId, partnerId) {
         if (data.sender_id !== partnerId && data.receiver_id !== partnerId) return;
         const container = document.getElementById('chat-messages');
         if (!container) return;
-        const isMine = data.sender_id === myId;
-        const div = document.createElement('div');
-        div.className = 'msg ' + (isMine ? 'mine' : 'theirs');
-        div.innerHTML = '<div class="msg-bubble">' + esc(data.content) + '</div><div class="msg-time">' + data.time + '</div>';
-        container.appendChild(div);
+        appendMessage(container, data, myId);
         container.scrollTop = container.scrollHeight;
     });
 }
+
+function renderMessageHTML(data, isMine) {
+    const t = data.msg_type || 'text';
+    let inner = '';
+    if (t === 'audio' && data.file_url_full) {
+        inner = `<div class="msg-bubble voice-msg">
+            <button class="voice-play-btn" onclick="playVoice(this)" data-src="${data.file_url_full}"><svg class="icon"><use href="#i-play"/></svg></button>
+            <div class="voice-waveform">${Array.from({length:20},(_,i)=>`<div class="wave-bar" style="height:${i%3===0?100:i%2===0?60:40}%;animation-delay:${i*0.05}s"></div>`).join('')}</div>
+            <span class="voice-duration">${fmtDuration(data.duration||0)}</span>
+            <audio src="${data.file_url_full}" preload="none"></audio>
+        </div>`;
+    } else if (t === 'image' && data.file_url_full) {
+        inner = `<img src="${data.file_url_full}" class="msg-image" onclick="window.open('${data.file_url_full}')">`;
+    } else if (t === 'video' && data.file_url_full) {
+        inner = `<video src="${data.file_url_full}" class="msg-video" controls></video>`;
+    } else if (t === 'file' && data.file_url_full) {
+        inner = `<div class="msg-bubble msg-file">
+            <div class="msg-file-icon"><svg class="icon"><use href="#i-file"/></svg></div>
+            <div class="msg-file-info"><div class="msg-file-name">${esc(data.file_name||'Файл')}</div><div class="msg-file-size">${Math.round((data.file_size||0)/1024)} КБ</div></div>
+            <a href="${data.file_url_full}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
+        </div>`;
+    } else {
+        inner = `<div class="msg-bubble">${esc(data.content)}</div>`;
+    }
+    return inner + `<div class="msg-time">${data.time}</div>`;
+}
+
+function appendMessage(container, data, myId) {
+    const isMine = data.sender_id === myId;
+    const div = document.createElement('div');
+    div.className = 'msg ' + (isMine ? 'mine' : 'theirs');
+    div.innerHTML = renderMessageHTML(data, isMine);
+    container.appendChild(div);
+}
+
+function fmtDuration(sec) {
+    const m = Math.floor(sec/60), s = sec%60;
+    return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
 function sendMessage(partnerId) {
     const inp = document.getElementById('chat-input');
     const txt = inp.value.trim();
@@ -257,6 +293,130 @@ function sendMessage(partnerId) {
     fetch('/chat/send', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => { if (!d.error) inp.value = ''; });
+}
+
+// ===== ОТПРАВКА ФАЙЛОВ =====
+function sendFile(partnerId, input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const fd = new FormData();
+    fd.append('receiver_id', partnerId);
+    fd.append('content', '');
+    fd.append('file', file);
+    // показываем превью
+    showSendingIndicator();
+    fetch('/chat/send', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => { hideSendingIndicator(); if (d.error) flashToast(d.error); input.value=''; });
+}
+
+// ===== ЗАПИСЬ ГОЛОСА (MediaRecorder) =====
+let mediaRecorder = null;
+let audioChunks = [];
+let recordStream = null;
+let recordTimer = null;
+let recordSeconds = 0;
+
+async function toggleRecording(partnerId, btn) {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        stopAndSendRecording(partnerId);
+        return;
+    }
+    try {
+        recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        // Выбираем подходящий mimeType
+        let opts = {};
+        if (MediaRecorder.isTypeSupported('audio/webm')) opts.mimeType = 'audio/webm';
+        else if (MediaRecorder.isTypeSupported('audio/mp4')) opts.mimeType = 'audio/mp4';
+        mediaRecorder = new MediaRecorder(recordStream, opts);
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstop = () => { recordStream.getTracks().forEach(t => t.stop()); };
+        mediaRecorder.start();
+        recordSeconds = 0;
+        updateRecTime();
+        recordTimer = setInterval(() => { recordSeconds++; updateRecTime(); }, 1000);
+        document.getElementById('voice-recording-bar').classList.remove('hidden');
+        btn.classList.add('recording');
+        btn.innerHTML = '<svg class="icon"><use href="#i-pause"/></svg>';
+    } catch (e) {
+        flashToast('Нет доступа к микрофону');
+    }
+}
+
+function updateRecTime() {
+    const el = document.getElementById('rec-time');
+    if (el) el.textContent = fmtDuration(recordSeconds);
+}
+
+function cancelRecording() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+    }
+    clearInterval(recordTimer);
+    document.getElementById('voice-recording-bar').classList.add('hidden');
+    const btn = document.getElementById('mic-btn');
+    if (btn) { btn.classList.remove('recording'); btn.innerHTML = '<svg class="icon"><use href="#i-mic"/></svg>'; }
+    audioChunks = [];
+}
+
+function stopAndSendRecording(partnerId) {
+    if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+    const duration = recordSeconds;
+    mediaRecorder.onstop = async () => {
+        recordStream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const ext = (mediaRecorder.mimeType || 'audio/webm').includes('mp4') ? 'm4a' : 'webm';
+        const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: blob.type });
+        const fd = new FormData();
+        fd.append('receiver_id', partnerId);
+        fd.append('content', '');
+        fd.append('msg_type', 'audio');
+        fd.append('duration', duration);
+        fd.append('file', file);
+        showSendingIndicator();
+        try {
+            await fetch('/chat/send', { method: 'POST', body: fd });
+        } finally {
+            hideSendingIndicator();
+        }
+    };
+    mediaRecorder.stop();
+    clearInterval(recordTimer);
+    document.getElementById('voice-recording-bar').classList.add('hidden');
+    const btn = document.getElementById('mic-btn');
+    if (btn) { btn.classList.remove('recording'); btn.innerHTML = '<svg class="icon"><use href="#i-mic"/></svg>'; }
+}
+
+// ===== ВОСПРОИЗВЕДЕНИЕ ГОЛОСОВОГО =====
+let currentAudio = null;
+function playVoice(btn) {
+    const audio = btn.parentElement.querySelector('audio');
+    if (!audio) return;
+    if (currentAudio && currentAudio !== audio) {
+        currentAudio.pause();
+        // сбросить иконку прошлого
+        document.querySelectorAll('.voice-play-btn').forEach(b => b.innerHTML = '<svg class="icon"><use href="#i-play"/></svg>');
+    }
+    currentAudio = audio;
+    if (audio.paused) {
+        audio.play();
+        btn.innerHTML = '<svg class="icon"><use href="#i-pause"/></svg>';
+        audio.onended = () => { btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg>'; };
+    } else {
+        audio.pause();
+        btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg>';
+    }
+}
+
+// ===== ИНДИКАТОР ОТПРАВКИ =====
+function showSendingIndicator() {
+    const area = document.getElementById('chat-preview-area');
+    if (area) area.innerHTML = '<div class="chat-preview"><div class="spinner"></div><div class="preview-info">Отправка...</div></div>';
+}
+function hideSendingIndicator() {
+    const area = document.getElementById('chat-preview-area');
+    if (area) area.innerHTML = '';
 }
 
 // автоисчезновение flash сообщений

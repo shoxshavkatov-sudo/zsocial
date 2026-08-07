@@ -15,7 +15,13 @@
                             <span class="time">{{ d.last_time | time_ago }}</span>
                         </div>
                         <div class="chat-list-bottom">
-                            <span class="preview">{{ (d.last_msg or '')[:40] }}</span>
+                            <span class="preview">
+                                {% if d.last_msg_type == 'audio' %}🎤 Голосовое
+                                {% elif d.last_msg_type == 'image' %}🖼️ Фото
+                                {% elif d.last_msg_type == 'video' %}🎬 Видео
+                                {% elif d.last_msg_type == 'file' %}📎 Файл
+                                {% else %}{{ (d.last_msg or '')[:40] }}{% endif %}
+                            </span>
                             {% if d.unread %}<span class="unread">{{ d.unread }}</span>{% endif %}
                         </div>
                     </div>
@@ -41,11 +47,35 @@
                 <span>@{{ partner.username }}</span>
             </div>
         </div>
+
         <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
             {% if messages %}
                 {% for m in messages %}
                 <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %}">
-                    <div class="msg-bubble">{{ m.content }}</div>
+                    {% if m.msg_type == 'audio' %}
+                        <div class="msg-bubble voice-msg">
+                            <button class="voice-play-btn" onclick="playVoice(this)" data-src="{{ url_for('static', filename=m.file_url) if m.file_url else '' }}">
+                                <svg class="icon"><use href="#i-play"/></svg>
+                            </button>
+                            <div class="voice-waveform">
+                                {% for i in range(20) %}<div class="wave-bar" style="height:{% if loop.index0 % 3 == 0 %}100%{% elif loop.index0 % 2 == 0 %}60%{% else %}40%{% endif %};animation-delay:{{ loop.index0 * 0.05 }}s"></div>{% endfor %}
+                            </div>
+                            <span class="voice-duration">{{ '%02d:%02d'|format((m.duration or 0)//60, (m.duration or 0)%60) }}</span>
+                            <audio src="{{ url_for('static', filename=m.file_url) if m.file_url else '' }}" preload="none"></audio>
+                        </div>
+                    {% elif m.msg_type == 'image' and m.file_url %}
+                        <img src="{{ url_for('static', filename=m.file_url) }}" class="msg-image" onclick="window.open('{{ url_for('static', filename=m.file_url) }}')">
+                    {% elif m.msg_type == 'video' and m.file_url %}
+                        <video src="{{ url_for('static', filename=m.file_url) }}" class="msg-video" controls></video>
+                    {% elif m.msg_type == 'file' and m.file_url %}
+                        <div class="msg-bubble msg-file">
+                            <div class="msg-file-icon"><svg class="icon"><use href="#i-file"/></svg></div>
+                            <div class="msg-file-info"><div class="msg-file-name">{{ m.file_name or 'Файл' }}</div><div class="msg-file-size">{{ (m.file_size/1024)|round(0) }} КБ</div></div>
+                            <a href="{{ url_for('static', filename=m.file_url) }}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
+                        </div>
+                    {% else %}
+                        <div class="msg-bubble">{{ m.content }}</div>
+                    {% endif %}
                     <div class="msg-time">{{ m.created_at | time_ago }}</div>
                 </div>
                 {% endfor %}
@@ -56,7 +86,31 @@
                 </div>
             {% endif %}
         </div>
+
+        <div id="voice-recording-bar" class="voice-recording-bar hidden">
+            <div class="rec-dot"></div>
+            <span class="rec-time" id="rec-time">00:00</span>
+            <span class="rec-label">Запись...</span>
+            <button class="rec-cancel" onclick="cancelRecording()">Отмена</button>
+            <button class="rec-send" onclick="stopAndSendRecording({{ partner.id }})">Отправить</button>
+        </div>
+
+        <div id="chat-preview-area"></div>
+
         <div class="chat-input-area">
+            <div class="chat-tools">
+                <button class="chat-tool-btn" onclick="document.getElementById('file-input').click()" title="Файл">
+                    <svg class="icon"><use href="#i-paperclip"/></svg>
+                </button>
+                <input type="file" id="file-input" class="hidden" onchange="sendFile({{ partner.id }}, this)">
+                <button class="chat-tool-btn" onclick="document.getElementById('image-input').click()" title="Фото/Видео">
+                    <svg class="icon"><use href="#i-image"/></svg>
+                </button>
+                <input type="file" id="image-input" class="hidden" accept="image/*,video/*" onchange="sendFile({{ partner.id }}, this)">
+                <button class="chat-tool-btn" id="mic-btn" onclick="toggleRecording({{ partner.id }}, this)" title="Голосовое">
+                    <svg class="icon"><use href="#i-mic"/></svg>
+                </button>
+            </div>
             <input id="chat-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
             <button class="btn btn-primary btn-icon-only" onclick="sendMessage({{ partner.id }})"><svg class="icon"><use href="#i-send"/></svg></button>
         </div>

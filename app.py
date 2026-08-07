@@ -14,7 +14,7 @@ import uuid
 
 from config import Config
 from models import (
-    init_db, get_db, close_db, can_view_profile, render_text_content,
+    init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     User, Post, Like, Comment, Bookmark, Follow, Message, Notification, SiteSettings
 )
 
@@ -80,6 +80,7 @@ def _seed_if_empty():
 # Инициализация БД с демо-данными при первом запуске
 with app.app_context():
     init_db()
+    migrate_db()
     _seed_if_empty()
 
 
@@ -164,7 +165,8 @@ def inject_globals():
 # ==================== АВТОРИЗАЦИЯ ====================
 @app.route('/')
 def index():
-    if SiteSettings.get('maintenance_mode') == '1' and (not current_user() or current_user()['role'] != 'admin'):
+    u = current_user()
+    if SiteSettings.get('maintenance_mode') == '1' and (not u or u['role'] != 'admin'):
         return render_template('maintenance.html')
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -237,9 +239,6 @@ def feed():
     else:
         posts = Post.get_all(tag=tag or None)
     liked = {p['id'] for p in posts if Like.is_liked(session['user_id'], p['id'])}
-    saved = {p['id'] for p in posts if Bookmark.get_by_user(session['user_id'])
-             and any(b['id'] == p['id'] for b in Bookmark.get_by_user(session['user_id']))}
-    # более эффективный способ для saved
     saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
     return render_template('feed.html', posts=posts, liked_posts=liked, saved_posts=saved_ids, tab=tab, tag=tag)
 
@@ -301,7 +300,6 @@ def add_comment(pid):
         return jsonify({'error': 'Пусто'}), 400
     c = Comment.create(session['user_id'], pid, content)
     Notification.create(post['user_id'], session['user_id'], 'comment', pid)
-    from datetime import datetime
     return jsonify({
         'id': c['id'], 'content': c['content'], 'username': c['username'],
         'avatar': c['avatar'], 'verified': c['verified'],
@@ -414,16 +412,54 @@ def send_message():
     u = current_user()
     rid = request.form.get('receiver_id', type=int)
     content = request.form.get('content', '').strip()
-    if not rid or not content:
-        return jsonify({'error': 'Ошибка'}), 400
+    msg_type = request.form.get('msg_type', 'text')
+    file = request.files.get('file')
+    duration = request.form.get('duration', type=int) or 0
+
+    if not rid:
+        return jsonify({'error': 'Нет получателя'}), 400
     if not User.get(rid):
         return jsonify({'error': 'Не найдено'}), 404
-    msg = Message.create(u['id'], rid, content)
+
+    file_url = None
+    file_name = None
+    file_size = 0
+
+    # Если есть файл — определяем тип и сохраняем
+    if file and file.filename:
+        if msg_type == 'text':
+            # авто-определение типа по расширению
+            fn = file.filename.lower()
+            if fn.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                msg_type = 'image'
+            elif fn.endswith(('.mp4', '.webm', '.mov', '.avi')):
+                msg_type = 'video'
+            elif fn.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.aac')):
+                msg_type = 'audio'
+            else:
+                msg_type = 'file'
+        prefix = {'image': 'img', 'video': 'vid', 'audio': 'voice', 'file': 'file'}.get(msg_type, 'file')
+        file_url = save_file(file, prefix)
+        file_name = file.filename
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        if not content:
+            content = {'image': '🖼️ Фото', 'video': '🎬 Видео', 'audio': '🎤 Голосовое', 'file': '📎 Файл'}.get(msg_type, 'Файл')
+
+    if not content and not file_url:
+        return jsonify({'error': 'Пусто'}), 400
+
+    msg = Message.create(u['id'], rid, content, msg_type=msg_type,
+                         file_url=file_url, file_name=file_name, file_size=file_size, duration=duration)
     data = {
-        'id': msg['id'], 'content': msg['content'],
+        'id': msg['id'], 'content': msg['content'], 'msg_type': msg['msg_type'],
+        'file_url': msg['file_url'], 'file_name': msg['file_name'],
+        'file_size': msg['file_size'], 'duration': msg['duration'],
         'sender_id': msg['sender_id'], 'receiver_id': msg['receiver_id'],
         'time': time_ago(msg['created_at']),
-        'sender_username': u['username'], 'sender_avatar': u['avatar']
+        'sender_username': u['username'], 'sender_avatar': u['avatar'],
+        'file_url_full': (url_for('static', filename=msg['file_url']) if msg['file_url'] else None),
     }
     socketio.emit('new_message', data, room=f'user_{rid}')
     socketio.emit('new_message', data, room=f'user_{u["id"]}')

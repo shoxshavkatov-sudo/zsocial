@@ -389,3 +389,173 @@ textarea.input { resize: vertical; min-height: 80px; }
 
 /* Аватары */
 img.avatar, .post-head img.avatar, .composer-inner img.avatar { background: var(--bg-muted); }
+
+/* ============================================
+   АНИМАЦИИ (плавность во всём)
+   ============================================ */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@keyframes popIn { 0% { transform: scale(0); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@keyframes heartBeat { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.35); } 50% { transform: scale(0.95); } 75% { transform: scale(1.15); } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes wave { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+
+/* Появление страниц и карточек */
+.main-content { animation: fadeIn 0.3s ease; }
+.post { animation: slideUp 0.4s ease backwards; }
+.post:nth-child(1) { animation-delay: 0.02s; }
+.post:nth-child(2) { animation-delay: 0.06s; }
+.post:nth-child(3) { animation-delay: 0.1s; }
+.post:nth-child(4) { animation-delay: 0.14s; }
+.post:nth-child(5) { animation-delay: 0.18s; }
+.post:nth-child(6) { animation-delay: 0.22s; }
+.post:nth-child(n+7) { animation-delay: 0.26s; }
+
+.person-row { animation: slideUp 0.3s ease backwards; }
+.notif-item { animation: slideUp 0.3s ease backwards; }
+
+/* Все интерактивные элементы — плавный transition */
+.btn, .post-action, .nav-item, .bottombar-item, .feed-tab, .admin-tab,
+.person-row, .chat-list-item, .notif-item, .dialog-item, .toggle,
+.composer-tool, .post-menu-btn, .back-btn, .theme-toggle {
+    will-change: transform, background-color, color, border-color, box-shadow;
+}
+
+/* Hover с подъёмом */
+.post-action:hover, .composer-tool:hover, .post-menu-btn:hover {
+    transform: translateY(-1px);
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:active, .post-action:active, .bottombar-item:active { transform: translateY(0) scale(0.97); }
+
+/* Лайк — анимация сердцебиения */
+.post-action.liked .icon { animation: heartBeat 0.45s ease; }
+
+/* Иконка верификации — красивая и анимированная */
+.verified-mark {
+    color: var(--highlight);
+    animation: popIn 0.4s ease;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+}
+
+/* Кнопки lower bar — эффект сжатия при нажатии + плавность */
+.bottombar-item {
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bottombar-item.active {
+    animation: scaleIn 0.3s ease;
+}
+.bottombar-item:hover { transform: translateY(-2px); }
+.bottombar-item.active .icon { transform: scale(1.1); transition: transform 0.25s; }
+
+/* Появление меню */
+.post-menu { animation: scaleIn 0.15s ease; transform-origin: top right; }
+
+/* Комментарии — плавное раскрытие */
+.comments-section:not(.hidden) { animation: slideUp 0.3s ease; }
+.comment { animation: slideUp 0.25s ease backwards; }
+
+/* Toast/flash — улучшенная анимация */
+.flash { animation: slideDown 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Аватары — плавное появление */
+img.avatar, .profile-avatar, .bottombar-avatar { transition: transform 0.25s; }
+.profile-avatar-wrap:hover .profile-avatar { transform: scale(1.04); }
+
+/* Поля ввода — плавная подсветка */
+.input:focus, .composer-body textarea:focus, input:focus {
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input:focus { box-shadow: 0 0 0 3px var(--highlight-soft); }
+.comment-input-row input:focus { box-shadow: 0 0 0 2px var(--highlight-soft); }
+
+/* Toggle переключатель — плавнее */
+.toggle { transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.toggle::after { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Тема — плавный переход */
+*, *::before, *::after { transition: background-color 0.25s, border-color 0.25s, color 0.15s; }
+/* (но не transform/opacity — они управляются отдельно) */
+
+/* Сообщение в чате — плавное появление */
+.msg { animation: slideUp 0.3s ease; }
+
+/* Skeleton/shimmer для загрузки (опционально) */
+.shimmer {
+    background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-hover) 50%, var(--bg-muted) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+/* Кнопка загрузки — спиннер */
+.spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+/* ============================================
+   ЧАТ: Голосовые, Файлы, Видео
+   ============================================ */
+.chat-tools { display: flex; gap: 2px; align-items: center; }
+.chat-tool-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text-secondary); background: none; border: none;
+    transition: all 0.2s; flex-shrink: 0;
+}
+.chat-tool-btn:hover { background: var(--highlight-soft); color: var(--highlight); transform: scale(1.1); }
+.chat-tool-btn.recording { background: var(--danger); color: white; animation: pulse 1s infinite; }
+
+/* Запись голоса — индикатор */
+.voice-recording-bar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    background: var(--danger-soft); border-radius: 12px; margin-bottom: 8px;
+    animation: slideUp 0.25s ease;
+}
+.voice-recording-bar .rec-dot { width: 10px; height: 10px; background: var(--danger); border-radius: 50%; animation: pulse 1s infinite; }
+.voice-recording-bar .rec-time { font-size: 14px; font-weight: 600; color: var(--danger); font-variant-numeric: tabular-nums; }
+.voice-recording-bar .rec-label { font-size: 13px; color: var(--text-secondary); flex: 1; }
+.voice-recording-bar button { padding: 4px 10px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+.voice-recording-bar .rec-cancel { background: var(--bg-hover); color: var(--text-secondary); }
+.voice-recording-bar .rec-send { background: var(--accent); color: var(--accent-contrast); }
+
+/* Аудио сообщение в чате */
+.voice-msg { display: flex; align-items: center; gap: 10px; min-width: 200px; }
+.voice-play-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.2); color: white; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    transition: transform 0.2s;
+}
+.msg.theirs .voice-play-btn { background: var(--highlight-soft); color: var(--highlight); }
+.voice-play-btn:hover { transform: scale(1.1); }
+.voice-waveform { display: flex; align-items: center; gap: 2px; height: 28px; flex: 1; }
+.voice-waveform .wave-bar { width: 3px; background: rgba(255,255,255,0.6); border-radius: 2px; animation: wave 1.2s infinite ease-in-out; }
+.msg.theirs .voice-waveform .wave-bar { background: var(--highlight); opacity: 0.6; }
+.voice-duration { font-size: 12px; opacity: 0.8; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* Файл/видео в сообщении */
+.msg-file { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+.msg-file-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.2); color: white; flex-shrink: 0; }
+.msg.theirs .msg-file-icon { background: var(--highlight-soft); color: var(--highlight); }
+.msg-file-info { flex: 1; min-width: 0; }
+.msg-file-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-file-size { font-size: 11px; opacity: 0.7; }
+.msg-video { border-radius: 10px; max-width: 280px; max-height: 240px; display: block; }
+.msg-image { border-radius: 10px; max-width: 240px; max-height: 280px; cursor: pointer; display: block; }
+
+/* Превью перед отправкой */
+.chat-preview { padding: 8px; display: flex; align-items: center; gap: 10px; background: var(--bg-muted); border-radius: 10px; margin-bottom: 8px; animation: slideUp 0.2s; }
+.chat-preview img, .chat-preview video { width: 50px; height: 50px; object-fit: cover; border-radius: 8px; }
+.chat-preview .preview-info { flex: 1; font-size: 13px; }
+.chat-preview .preview-info strong { display: block; }
+.chat-preview .preview-remove { cursor: pointer; color: var(--text-muted); padding: 4px; }
+.chat-preview .preview-remove:hover { color: var(--danger); }
+

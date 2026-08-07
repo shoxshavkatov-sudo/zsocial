@@ -98,6 +98,11 @@ def init_db():
         sender_id INTEGER NOT NULL,
         receiver_id INTEGER NOT NULL,
         content TEXT NOT NULL,
+        msg_type TEXT DEFAULT 'text',
+        file_url TEXT,
+        file_name TEXT,
+        file_size INTEGER DEFAULT 0,
+        duration INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_read INTEGER DEFAULT 0,
         FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -133,6 +138,50 @@ def init_db():
     for k, v in defaults.items():
         conn.execute('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', (k, v))
 
+    conn.commit()
+    conn.close()
+
+
+def migrate_db():
+    """Добавляет новые колонки, если БД уже существует (миграция)."""
+    conn = sqlite3.connect(Config.DATABASE)
+    # Проверяем и добавляем недостающие колонки в messages
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(messages)').fetchall()]
+    new_cols = {
+        'msg_type': 'TEXT DEFAULT "text"',
+        'file_url': 'TEXT',
+        'file_name': 'TEXT',
+        'file_size': 'INTEGER DEFAULT 0',
+        'duration': 'INTEGER DEFAULT 0',
+    }
+    for col, typedef in new_cols.items():
+        if col not in cols:
+            conn.execute(f'ALTER TABLE messages ADD COLUMN {col} {typedef}')
+    # Проверяем колонки users (verified, is_private, banned, role)
+    ucols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
+    user_new = {
+        'role': 'TEXT DEFAULT "user"',
+        'verified': 'INTEGER DEFAULT 0',
+        'is_private': 'INTEGER DEFAULT 0',
+        'banned': 'INTEGER DEFAULT 0',
+    }
+    for col, typedef in user_new.items():
+        if col not in ucols:
+            conn.execute(f'ALTER TABLE users ADD COLUMN {col} {typedef}')
+    # bookmarks таблица (если старая БД)
+    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    if 'bookmarks' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS bookmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            post_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, post_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+        )''')
+    if 'settings' not in tables:
+        conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     conn.commit()
     conn.close()
 
@@ -393,9 +442,12 @@ class Follow:
 
 class Message:
     @staticmethod
-    def create(s, r, content):
+    def create(s, r, content, msg_type='text', file_url=None, file_name=None, file_size=0, duration=0):
         db = get_db()
-        db.execute('INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)', (s, r, content))
+        db.execute('''INSERT INTO messages
+            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration)
+            VALUES (?,?,?,?,?,?,?,?)''',
+            (s, r, content, msg_type, file_url, file_name, file_size, duration))
         db.commit()
         return db.execute('SELECT * FROM messages WHERE id = last_insert_rowid()').fetchone()
 
@@ -429,6 +481,10 @@ class Message:
                     WHERE (sender_id=convos.other_id AND receiver_id=?)
                        OR (sender_id=? AND receiver_id=convos.other_id)
                     ORDER BY created_at DESC LIMIT 1) AS last_msg,
+                   (SELECT msg_type FROM messages
+                    WHERE (sender_id=convos.other_id AND receiver_id=?)
+                       OR (sender_id=? AND receiver_id=convos.other_id)
+                    ORDER BY created_at DESC LIMIT 1) AS last_msg_type,
                    (SELECT created_at FROM messages
                     WHERE (sender_id=convos.other_id AND receiver_id=?)
                        OR (sender_id=? AND receiver_id=convos.other_id)
@@ -444,7 +500,7 @@ class Message:
             ) AS convos
             JOIN users u ON u.id = convos.other_id
             ORDER BY convos.max_time DESC
-        ''', (uid, uid, uid, uid, uid, uid, uid, uid)).fetchall()
+        ''', (uid, uid, uid, uid, uid, uid, uid, uid, uid)).fetchall()
         return rows
 
 
