@@ -7,6 +7,20 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ APP_VERSION }}">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f172a'/><text x='16' y='23' font-size='18' fill='white' text-anchor='middle' font-family='Arial' font-weight='800'>Z</text></svg>">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>
+        // Применяем тему ДО отрисовки страницы — предотвращает «вспышку»
+        // светлой темы при загрузке для пользователей с тёмной темой.
+        (function () {
+            try {
+                var t = localStorage.getItem('zs-theme');
+                if (!t) {
+                    var m = document.cookie.match(/(?:^|;\s*)theme=(dark|light)/);
+                    t = m ? m[1] : 'light';
+                }
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { }
+        })();
+    </script>
 </head>
 <body data-user-id="{{ cu.id if cu else '' }}" data-is-admin="{{ '1' if cu and cu.role == 'admin' else '0' }}">
 
@@ -77,12 +91,43 @@
 {% block body %}{% endblock %}
 
 {% if cu %}
+{# === Верхний бар: поиск, группы, закладки, уведомления === #}
+<nav class="topbar">
+    <button class="topbar-logo" onclick="location.href='{{ url_for('feed') }}'" title="{{ site_name }}">
+        <span class="logo-mark">Z</span>
+    </button>
+    <div class="topbar-items">
+        <button class="topbar-item {% if request.endpoint == 'people' %}active{% endif %}" onclick="location.href='{{ url_for('people') }}'" title="Поиск людей">
+            <svg class="icon"><use href="#i-search"/></svg>
+            <span class="topbar-label">Поиск</span>
+        </button>
+        <button class="topbar-item {% if request.endpoint == 'groups' %}active{% endif %}" onclick="location.href='{{ url_for('groups') }}'" title="Группы">
+            <svg class="icon"><use href="#i-users"/></svg>
+            <span class="topbar-label">Группы</span>
+        </button>
+        <button class="topbar-item {% if request.endpoint == 'bookmarks' %}active{% endif %}" onclick="location.href='{{ url_for('bookmarks') }}'" title="Закладки">
+            <svg class="icon"><use href="#i-bookmark"/></svg>
+            <span class="topbar-label">Закладки</span>
+        </button>
+        <button class="topbar-item {% if request.endpoint == 'notifications' %}active{% endif %}" onclick="location.href='{{ url_for('notifications') }}'" title="Уведомления">
+            <svg class="icon"><use href="#i-bell"/></svg>
+            <span class="topbar-label">Уведомления</span>
+            {% if unread_notifs > 0 %}<span class="tb-badge">{{ unread_notifs }}</span>{% endif %}
+        </button>
+        {% if cu.role == 'admin' %}
+        <button class="topbar-item {% if request.endpoint == 'admin' %}active{% endif %}" onclick="location.href='{{ url_for('admin') }}'" title="Админ-панель">
+            <svg class="icon"><use href="#i-shield"/></svg>
+            <span class="topbar-label">Админ</span>
+        </button>
+        {% endif %}
+    </div>
+</nav>
+<script>document.body.classList.add('has-topbar');</script>
+
+{# === Нижний бар: лента, создать, сообщения, профиль, тема === #}
 <nav class="bottombar">
     <button class="bottombar-item {% if request.endpoint == 'feed' %}active{% endif %}" onclick="location.href='{{ url_for('feed') }}'" title="Лента">
         <svg class="icon"><use href="#i-home"/></svg>
-    </button>
-    <button class="bottombar-item {% if request.endpoint == 'people' %}active{% endif %}" onclick="location.href='{{ url_for('people') }}'" title="Поиск">
-        <svg class="icon"><use href="#i-search"/></svg>
     </button>
     <button class="bottombar-item compose-btn" onclick="openComposeModal()" title="Новый пост">
         <svg class="icon"><use href="#i-plus"/></svg>
@@ -91,24 +136,9 @@
         <svg class="icon"><use href="#i-chat"/></svg>
         {% if unread_msgs > 0 %}<span class="bb-badge">{{ unread_msgs }}</span>{% endif %}
     </button>
-    <button class="bottombar-item {% if request.endpoint == 'notifications' %}active{% endif %}" onclick="location.href='{{ url_for('notifications') }}'" title="Уведомления">
-        <svg class="icon"><use href="#i-bell"/></svg>
-        {% if unread_notifs > 0 %}<span class="bb-badge">{{ unread_notifs }}</span>{% endif %}
-    </button>
-    <button class="bottombar-item {% if request.endpoint == 'bookmarks' %}active{% endif %}" onclick="location.href='{{ url_for('bookmarks') }}'" title="Закладки">
-        <svg class="icon"><use href="#i-bookmark"/></svg>
-    </button>
-    <button class="bottombar-item {% if request.endpoint == 'groups' %}active{% endif %}" onclick="location.href='{{ url_for('groups') }}'" title="Группы">
-        <svg class="icon"><use href="#i-users"/></svg>
-    </button>
-    <button class="bottombar-item {% if request.endpoint == 'profile' %}active{% endif %}" onclick="location.href='{{ url_for('profile', username=cu.username) }}'" title="Профиль">
+    <button class="bottombar-item {% if request.endpoint in ['profile','settings'] %}active{% endif %}" onclick="location.href='{{ url_for('profile', username=cu.username) }}'" title="Профиль">
         <img src="{{ media_url(cu.avatar) }}" class="bottombar-avatar" alt="">
     </button>
-    {% if cu.role == 'admin' %}
-    <button class="bottombar-item {% if request.endpoint == 'admin' %}active{% endif %}" onclick="location.href='{{ url_for('admin') }}'" title="Админ">
-        <svg class="icon"><use href="#i-shield"/></svg>
-    </button>
-    {% endif %}
     <button class="bottombar-item bottombar-theme" onclick="toggleTheme()" title="Тема">
         <svg class="icon"><use href="#i-{{ 'sun' if request.cookies.get('theme') == 'dark' else 'moon' }}"/></svg>
     </button>

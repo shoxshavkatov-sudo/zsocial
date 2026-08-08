@@ -47,6 +47,8 @@ body {
     padding-bottom: 0;
 }
 body.has-bottombar { padding-bottom: 72px; }
+body.has-topbar { padding-top: 56px; }
+body.has-topbar.has-bottombar { padding-top: 56px; padding-bottom: 72px; }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--highlight); }
 button { font-family: inherit; }
@@ -384,6 +386,57 @@ textarea.input { resize: vertical; min-height: 80px; }
 .bottombar-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--border); }
 .bottombar-item.active .bottombar-avatar { border-color: var(--accent-contrast); }
 .bottombar-theme { padding: 8px; border-left: 1px solid var(--border); margin-left: 4px; }
+
+/* ===== ВЕРХНИЙ BAR (TOPBAR) ===== */
+.topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: 52px; display: flex; align-items: center; gap: 12px;
+    padding: 0 12px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    border-bottom: 1px solid var(--glass-border);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.topbar-logo {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 9px; border: none;
+    background: var(--accent); color: #fff; cursor: pointer;
+    flex-shrink: 0;
+}
+.topbar-logo .logo-mark { font-weight: 800; font-size: 18px; }
+.topbar-items {
+    display: flex; align-items: center; gap: 2px;
+    margin-left: auto;
+}
+.topbar-item {
+    position: relative; display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    color: var(--text-secondary); background: none; border: none;
+    transition: all 0.18s; white-space: nowrap;
+}
+.topbar-item:hover { background: var(--bg-hover); color: var(--text); }
+.topbar-item.active { background: var(--accent); color: var(--accent-contrast); }
+.topbar-item .icon { width: 18px; height: 18px; flex-shrink: 0; }
+.topbar-label { font-size: 13px; font-weight: 600; }
+.tb-badge {
+    position: absolute; top: 2px; right: 4px;
+    background: var(--danger); color: white;
+    font-size: 9px; font-weight: 700; padding: 1px 5px;
+    border-radius: 999px; min-width: 16px; text-align: center;
+}
+.topbar-item.active .tb-badge { background: var(--accent-contrast); color: var(--accent); }
+
+/* Адаптив: на узких экранах скрываем подписи, оставляем иконки */
+@media (max-width: 560px) {
+    .topbar-label { display: none; }
+    .topbar-item { padding: 8px 11px; }
+}
+@media (max-width: 380px) {
+    .topbar { gap: 8px; padding: 0 8px; }
+    .topbar-logo { width: 30px; height: 30px; }
+    .topbar-item { padding: 8px 9px; }
+}
 
 .hidden { display: none !important; }
 
