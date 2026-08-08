@@ -255,8 +255,8 @@ class TestGroups:
     def test_post_in_group(self, app):
         client = auth_client(app, username='groupposter')
         client.post('/group/create', data={'name': 'Postable Group'})
-        r = client.post('/group/postable-group/post', data={
-            'content': 'Group post here!',
+        r = client.post('/group/postable-group/chat/send', data={
+            'content': 'Group message here!',
         })
         assert r.status_code == 200
         assert r.get_json()['ok'] is True
@@ -265,7 +265,7 @@ class TestGroups:
         owner = auth_client(app, username='gowner4')
         owner.post('/group/create', data={'name': 'Private Group X'})
         outsider = auth_client(app, username='outsider')
-        r = outsider.post('/group/private-group-x/post', data={
+        r = outsider.post('/group/private-group-x/chat/send', data={
             'content': 'Intrusion attempt',
         })
         assert r.status_code == 403

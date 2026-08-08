@@ -19,7 +19,8 @@ from config import Config
 from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     is_online,
-    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings
+    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings,
+    GroupMessage, VoiceRoom
 )
 import mailer
 
@@ -229,6 +230,22 @@ app.jinja_env.filters['time_ago'] = time_ago
 app.jinja_env.filters['render_text'] = render_text_content
 
 
+@app.template_filter('urlize_message')
+def urlize_message(text):
+    """Экранирует текст и делает URL кликабельными (для чата)."""
+    import re as _re
+    from markupsafe import Markup, escape
+    if not text:
+        return Markup('')
+    safe = str(escape(text))
+    # ссылки
+    safe = _re.sub(
+        r'(https?://[^\s<]+)',
+        r'<a href="\1" target="_blank" rel="noopener">\1</a>',
+        safe)
+    return Markup(safe)
+
+
 @app.context_processor
 def inject_globals():
     u = current_user()
@@ -255,6 +272,9 @@ def inject_globals():
     def view_count(post_id):
         return PostView.count(post_id)
 
+    def voice_room_participants(room_id):
+        return VoiceRoom.get_participants(room_id)
+
     return dict(cu=u, unread_notifs=notifs, unread_msgs=msgs,
                 site_name=site.get('site_name', 'ZSocial'),
                 site_desc=site.get('site_desc', ''),
@@ -265,7 +285,8 @@ def inject_globals():
                 is_online=is_online,
                 poll_for=poll_for,
                 has_voted=has_voted,
-                view_count=view_count)
+                view_count=view_count,
+                voice_room_participants=voice_room_participants)
 
 
 @app.context_processor
@@ -564,11 +585,23 @@ def group_page(slug):
     if not g:
         flash('Группа не найдена', 'error'); return redirect(url_for('groups'))
     members = Group.get_members(g['id'])
-    posts = Group.get_posts(g['id'])
     am_member = Group.is_member(g['id'], session['user_id'])
     am_owner = g['owner_id'] == session['user_id']
-    return render_template('group.html', g=g, members=members, posts=posts,
-                           am_member=am_member, am_owner=am_owner)
+    # Групповой чат (как в Telegram)
+    chat_messages = GroupMessage.get_recent(g['id'], 100) if am_member else []
+    # Голосовые комнаты (как в Discord)
+    voice_rooms = VoiceRoom.get_by_group(g['id']) if am_member else []
+    my_voice_room = None
+    if am_member:
+        for vr in voice_rooms:
+            for p in VoiceRoom.get_participants(vr['id']):
+                if p['user_id'] == session['user_id']:
+                    my_voice_room = vr['id']
+                    break
+    return render_template('group.html', g=g, members=members,
+                           am_member=am_member, am_owner=am_owner,
+                           chat_messages=chat_messages, voice_rooms=voice_rooms,
+                           my_voice_room=my_voice_room)
 
 
 @app.route('/group/<slug>/join', methods=['POST'])
@@ -581,23 +614,81 @@ def join_group(slug):
     return jsonify({'joined': joined})
 
 
-@app.route('/group/<slug>/post', methods=['POST'])
+@app.route('/group/<slug>/chat/send', methods=['POST'])
 @login_required
-def group_post(slug):
+def group_chat_send(slug):
+    """Отправка сообщения в групповой чат ( realtime через Socket.IO)."""
     g = Group.get_by_slug(slug)
     if not g:
         return jsonify({'error': 'Не найдено'}), 404
     if not Group.is_member(g['id'], session['user_id']):
         return jsonify({'error': 'Только для участников'}), 403
     content = request.form.get('content', '').strip()
-    image = None
-    f = request.files.get('image')
+    msg_type = 'text'
+    file_url = None
+    file_name = None
+    file_size = 0
+    f = request.files.get('file')
     if f and f.filename:
-        image = save_file(f, 'post')
-    if not content and not image:
+        file_url = save_file(f, 'gmsg')
+        file_name = f.filename
+        file_size = 0
+        ext = f.filename.rsplit('.', 1)[-1].lower() if '.' in f.filename else ''
+        if ext in {'jpg', 'jpeg', 'png', 'gif', 'webp'}:
+            msg_type = 'image'
+        elif ext in {'mp4', 'webm', 'mov'}:
+            msg_type = 'video'
+        else:
+            msg_type = 'file'
+    if not content and not file_url:
         return jsonify({'error': 'Пусто'}), 400
-    Post.create(session['user_id'], content, image=image, group_id=g['id'])
-    return jsonify({'ok': True})
+    mid = GroupMessage.create(g['id'], session['user_id'], content,
+                              msg_type=msg_type, file_url=file_url,
+                              file_name=file_name, file_size=file_size)
+    u = current_user()
+    msg_data = {
+        'id': mid,
+        'group_id': g['id'],
+        'sender_id': session['user_id'],
+        'sender_name': u['display_name'] or u['username'],
+        'sender_username': u['username'],
+        'sender_avatar': u['avatar'],
+        'verified': u['verified'],
+        'content': content,
+        'msg_type': msg_type,
+        'file_url': file_url,
+        'file_name': file_name,
+        'created_at': 'только что',
+    }
+    socketio.emit('group_message', msg_data, room=f'group_{g["id"]}')
+    return jsonify({'ok': True, 'message': msg_data})
+
+
+@app.route('/group/<slug>/chat/delete/<int:mid>', methods=['POST'])
+@login_required
+def group_chat_delete(slug, mid):
+    g = Group.get_by_slug(slug)
+    if not g:
+        return jsonify({'error': 'Не найдено'}), 404
+    if GroupMessage.delete(mid, session['user_id']):
+        socketio.emit('group_message_deleted', {'id': mid, 'group_id': g['id']},
+                      room=f'group_{g["id"]}')
+        return jsonify({'ok': True})
+    return jsonify({'error': 'Нельзя удалить'}), 403
+
+
+@app.route('/group/<slug>/voice/create', methods=['POST'])
+@login_required
+def voice_create(slug):
+    """Создать голосовую комнату в группе."""
+    g = Group.get_by_slug(slug)
+    if not g:
+        return jsonify({'error': 'Не найдено'}), 404
+    if g['owner_id'] != session['user_id']:
+        return jsonify({'error': 'Только владелец может создавать комнаты'}), 403
+    name = request.form.get('name', 'Голосовая').strip() or 'Голосовая'
+    rid = VoiceRoom.create(g['id'], name)
+    return jsonify({'ok': True, 'room_id': rid, 'name': name})
 
 
 @app.route('/group/<slug>/members')
@@ -992,6 +1083,111 @@ def handle_stop_typing(data):
     to = (data or {}).get('to')
     if to:
         emit('stop_typing', {'from': session['user_id']}, room=f'user_{to}')
+
+
+# ==================== ГРУППОВЫЕ ЧАТЫ ====================
+@socketio.on('group_join')
+def handle_group_join(data):
+    """Вступить в комнату группы (для realtime-сообщений)."""
+    if 'user_id' not in session:
+        return
+    gid = (data or {}).get('group_id')
+    if gid and Group.is_member(gid, session['user_id']):
+        join_room(f'group_{gid}')
+
+
+@socketio.on('group_typing')
+def handle_group_typing(data):
+    if 'user_id' not in session:
+        return
+    gid = (data or {}).get('group_id')
+    if gid and Group.is_member(gid, session['user_id']):
+        emit('group_typing', {'from': session['user_id'],
+                              'name': (data or {}).get('name', '')},
+             room=f'group_{gid}', include_self=False)
+
+
+@socketio.on('group_stop_typing')
+def handle_group_stop_typing(data):
+    if 'user_id' not in session:
+        return
+    gid = (data or {}).get('group_id')
+    if gid:
+        emit('group_stop_typing', {'from': session['user_id']},
+             room=f'group_{gid}', include_self=False)
+
+
+# ==================== ГОЛОСОВЫЕ КОМНАТЫ (Discord-like) ====================
+# Полностью peer-to-peer mesh через WebRTC. Сервер только маршрутизирует
+# сигналинг между участниками комнаты.
+@socketio.on('voice_join')
+def handle_voice_join(data):
+    """Пользователь входит в голосовую комнату — оповещаем всех в комнате."""
+    if 'user_id' not in session:
+        return
+    room_id = (data or {}).get('room_id')
+    if not room_id:
+        return
+    room = VoiceRoom.get(room_id)
+    if not room:
+        return
+    if not Group.is_member(room['group_id'], session['user_id']):
+        return
+    VoiceRoom.join(room_id, session['user_id'])
+    room_key = f'voice_{room_id}'
+    join_room(room_key)
+    # Говорим остальным, что новичок хочет подключиться — они инициируют offer
+    emit('voice_user_joined', {
+        'user_id': session['user_id'],
+        'name': (data or {}).get('name', ''),
+    }, room=room_key, include_self=False)
+    # Шлём новичку список уже присутствующих (чтобы он знал, к кому подключаться)
+    peers = VoiceRoom.get_participants(room_id)
+    emit('voice_peers', {
+        'peers': [{'user_id': p['user_id']} for p in peers if p['user_id'] != session['user_id']],
+    })
+
+
+@socketio.on('voice_leave')
+def handle_voice_leave(data):
+    if 'user_id' not in session:
+        return
+    room_id = (data or {}).get('room_id')
+    if not room_id:
+        return
+    VoiceRoom.leave(room_id, session['user_id'])
+    leave_room(f'voice_{room_id}')
+    emit('voice_user_left', {'user_id': session['user_id']},
+         room=f'voice_{room_id}', include_self=False)
+
+
+@socketio.on('voice_signal')
+def handle_voice_signal(data):
+    """Маршрутизация WebRTC сигналинга между двумя пирами в голосовой комнате.
+    Peer-to-peer: один участник шлёт offer/answer/candidate другому напрямую."""
+    if 'user_id' not in session:
+        return
+    to = (data or {}).get('to')
+    if not to:
+        return
+    emit('voice_signal', {
+        'from': session['user_id'],
+        'signal': (data or {}).get('signal'),
+    }, room=f'user_{to}')
+
+
+@socketio.on('voice_mute')
+def handle_voice_mute(data):
+    """Оповещение об изменении состояния микрофона."""
+    if 'user_id' not in session:
+        return
+    room_id = (data or {}).get('room_id')
+    muted = bool((data or {}).get('muted'))
+    if room_id:
+        VoiceRoom.set_muted(room_id, session['user_id'], muted)
+        emit('voice_mute_changed', {
+            'user_id': session['user_id'], 'muted': muted,
+        }, room=f'voice_{room_id}', include_self=False)
 
 
 # ==================== ВЕБ-ЗВОНКИ (WebRTC сигналинг) ====================

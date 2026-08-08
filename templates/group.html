@@ -1,85 +1,162 @@
 {% extends "base.html" %}
-{% block title %}{{ g.name }}{% endblock %}
+{% block title %}{{ g.name }} · {{ site_name }}{% endblock %}
 {% block body %}
-<div class="profile-header group-header">
-    <img class="profile-cover" src="{{ _media_for(g.cover) }}" alt="">
-    <div class="profile-info" style="padding:12px 16px">
-        <h2>{{ g.name }}
-            {% if g.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
-        </h2>
-        <div style="font-size:13px;color:var(--text-muted)">@{{ g.slug }} · {{ members|length }} участников</div>
-        {% if g.description %}<div style="font-size:14px;margin:4px 0">{{ g.description }}</div>{% endif %}
-        <div class="group-actions" style="margin-top:8px">
-            {% if not am_owner %}
-            <button id="join-btn" class="btn {{ 'btn-secondary' if am_member else 'btn-primary' }}"
-                    onclick="toggleJoin('{{ g.slug }}')">{{ 'Вступить' if not am_member else 'Покинуть' }}</button>
+<div class="group-page" data-group-id="{{ g.id }}" data-slug="{{ g.slug }}">
+
+    {# === Шапка группы === #}
+    <div class="group-head">
+        <button class="btn btn-ghost btn-icon-only" onclick="location.href='{{ url_for('groups') }}'">
+            <svg class="icon"><use href="#i-arrow-left"/></svg>
+        </button>
+        <img class="group-head-avatar" src="{{ media_url(g.cover) }}" alt="">
+        <div class="group-head-info">
+            <h2>{{ g.name }}
+                {% if g.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
+            </h2>
+            <div class="group-head-meta">{{ members|length }} участников</div>
+        </div>
+    </div>
+
+    {% if not am_member %}
+    {# === Не участник — показываем описание + кнопка вступить === #}
+    <div class="group-join-prompt">
+        {% if g.description %}<p class="group-desc">{{ g.description }}</p>{% endif %}
+        <button class="btn btn-primary btn-full" onclick="joinGroup('{{ g.slug }}')">Вступить в группу</button>
+    </div>
+    {% else %}
+
+    {# === Голосовые комнаты (Discord-like) === #}
+    {% if am_owner %}
+    <div class="voice-create-bar">
+        <input type="text" id="voice-room-name" class="input" placeholder="Название голосовой комнаты" maxlength="40">
+        <button class="btn btn-sm btn-primary" onclick="createVoiceRoom('{{ g.slug }}')">
+            <svg class="icon icon-sm"><use href="#i-plus"/></svg> Комната
+        </button>
+    </div>
+    {% endif %}
+
+    <div class="voice-rooms" id="voice-rooms">
+        {% for vr in voice_rooms %}
+        <div class="voice-room" data-room-id="{{ vr.id }}">
+            <div class="voice-room-head" onclick="toggleVoiceRoom({{ vr.id }})">
+                <svg class="icon"><use href="#i-volume"/></svg>
+                <span class="vr-name">{{ vr.name }}</span>
+                <span class="vr-count">{{ vr.participants_count }}</span>
+            </div>
+            <div class="voice-room-body">
+                <div class="voice-participants" id="vr-participants-{{ vr.id }}">
+                    {% for p in voice_room_participants(vr.id) %}
+                    <div class="voice-participant" data-uid="{{ p.user_id }}">
+                        <img src="{{ media_url(p.avatar) }}" alt="">
+                        <span>{{ p.display_name or p.username }}</span>
+                        {% if p.muted %}<svg class="icon icon-sm vr-muted"><use href="#i-mic-off"/></svg>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if vr.id == my_voice_room %}
+                <div class="voice-controls" id="voice-controls-{{ vr.id }}">
+                    <button class="vc-btn" id="vc-mute-btn" onclick="toggleVoiceMute({{ vr.id }})" title="Микрофон">
+                        <svg class="icon"><use href="#i-mic"/></svg>
+                    </button>
+                    <button class="vc-btn vc-leave" onclick="leaveVoiceRoom({{ vr.id }})" title="Покинуть">
+                        <svg class="icon"><use href="#i-phone-off"/></svg>
+                    </button>
+                </div>
+                {% else %}
+                <button class="btn btn-sm btn-primary vc-join" onclick="joinVoiceRoom({{ vr.id }})">
+                    <svg class="icon icon-sm"><use href="#i-phone"/></svg> Войти
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# === Групповой чат (Telegram-like) === #}
+    <div class="group-chat-wrap">
+        <div class="group-chat" id="group-chat" data-group-id="{{ g.id }}" data-me="{{ cu.id }}">
+            {% if chat_messages %}
+                {% for m in chat_messages %}
+                <div class="gc-msg {% if m.sender_id == cu.id %}mine{% endif %}" id="gcmsg-{{ m.id }}">
+                    {% if m.sender_id != cu.id %}
+                    <img class="gc-avatar" src="{{ media_url(m.avatar) }}" onclick="location.href='/profile/{{ m.username }}'">
+                    {% endif %}
+                    <div class="gc-bubble-wrap">
+                        {% if m.sender_id != cu.id %}
+                        <div class="gc-sender">
+                            {{ m.display_name or m.username }}
+                            {% if m.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}
+                            {% if m.role == 'admin' %}<span class="gc-role">ADMIN</span>{% endif %}
+                        </div>
+                        {% endif %}
+                        {% if m.msg_type == 'image' and m.file_url %}
+                        <img class="gc-image" src="{{ media_url(m.file_url) }}" onclick="openLightbox('{{ media_url(m.file_url) }}')">
+                        {% elif m.msg_type == 'video' and m.file_url %}
+                        <video class="gc-video" src="{{ media_url(m.file_url) }}" controls></video>
+                        {% elif m.msg_type == 'file' and m.file_url %}
+                        <a class="gc-file" href="{{ media_url(m.file_url) }}" download>
+                            <svg class="icon"><use href="#i-file"/></svg>
+                            <span>{{ m.file_name or 'Файл' }}</span>
+                        </a>
+                        {% endif %}
+                        {% if m.content %}
+                        <div class="gc-text">{{ m.content|urlize_message|safe }}</div>
+                        {% endif %}
+                        <div class="gc-meta">
+                            {{ m.created_at|time_ago }}
+                            {% if m.sender_id == cu.id %}
+                            <button class="gc-del" onclick="deleteGroupMsg({{ m.id }}, '{{ g.slug }}')" title="Удалить">
+                                <svg class="icon icon-sm"><use href="#i-trash"/></svg>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+            <div class="gc-empty">
+                <svg class="icon icon-xl"><use href="#i-chat"/></svg>
+                <p>Нет сообщений. Будьте первым!</p>
+            </div>
             {% endif %}
-            <a href="/group/{{ g.slug }}/members" class="btn btn-secondary">Участники</a>
+        </div>
+
+        <div class="group-typing hidden" id="group-typing"><span class="typing-dots"><span></span><span></span><span></span></span> кто-то печатает...</div>
+
+        <div class="group-chat-input">
+            <button class="gci-tool" onclick="document.getElementById('gc-file-input').click()" title="Файл">
+                <svg class="icon"><use href="#i-paperclip"/></svg>
+            </button>
+            <input type="file" id="gc-file-input" class="hidden" onchange="sendGroupFile('{{ g.slug }}', this)">
+            <input id="gc-text-input" placeholder="Сообщение в {{ g.name }}..."
+                   oninput="notifyGroupTyping({{ g.id }})"
+                   onkeypress="if(event.key==='Enter')sendGroupMessage('{{ g.slug }}')">
+            <button class="btn btn-primary btn-icon-only" onclick="sendGroupMessage('{{ g.slug }}')">
+                <svg class="icon"><use href="#i-send"/></svg>
+            </button>
         </div>
     </div>
-</div>
 
-{% if am_member %}
-<div style="padding:12px 16px">
-    <div class="compose-box">
-        <textarea id="gpost-input" placeholder="Что нового?" rows="2"></textarea>
-        <div class="compose-actions">
-            <label class="btn btn-sm"><svg class="icon icon-sm"><use href="#i-image"/></svg><input type="file" accept="image/*" hidden onchange="previewGroupImage(this)"></label>
-            <button class="btn btn-primary btn-sm" onclick="submitGroupPost('{{ g.slug }}')">Опубликовать</button>
-        </div>
-        <div id="gpost-preview" class="compose-preview" style="display:none"><img id="gpost-preview-img" src=""></div>
+    <div class="group-side-info">
+        {% if g.description %}<div class="gsi-desc">{{ g.description }}</div>{% endif %}
+        <a href="/group/{{ g.slug }}/members" class="gsi-members">
+            <svg class="icon"><use href="#i-users"/></svg> {{ members|length }} участников
+        </a>
+        {% if not am_owner %}
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="leaveGroup('{{ g.slug }}')">Покинуть группу</button>
+        {% endif %}
     </div>
-</div>
-{% endif %}
 
-{% if posts %}
-    {% include "_posts.html" %}
-{% else %}
-<div class="empty-state" style="padding-top:40px">
-    <svg class="icon empty-icon"><use href="#i-message-circle"/></svg>
-    <p>Пока нет постов</p>
+    {% endif %}
 </div>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-function toggleJoin(slug) {
-    fetch('/group/' + slug + '/join', { method: 'POST' })
-        .then(r => r.json()).then(d => {
-            if (d.joined) {
-                document.getElementById('join-btn').textContent = 'Покинуть';
-                document.getElementById('join-btn').className = 'btn btn-secondary';
-            } else {
-                document.getElementById('join-btn').textContent = 'Вступить';
-                document.getElementById('join-btn').className = 'btn btn-primary';
-            }
-            location.reload();
-        });
-}
-let groupImage = null;
-function previewGroupImage(inp) {
-    if (!inp.files[0]) return;
-    groupImage = inp.files[0];
-    const r = new FileReader();
-    r.onload = e => {
-        const p = document.getElementById('gpost-preview');
-        document.getElementById('gpost-preview-img').src = e.target.result;
-        p.style.display = 'block';
-    };
-    r.readAsDataURL(groupImage);
-}
-function submitGroupPost(slug) {
-    const content = document.getElementById('gpost-input').value.trim();
-    if (!content && !groupImage) return flashToast('Пусто');
-    const fd = new FormData();
-    fd.append('content', content);
-    if (groupImage) fd.append('image', groupImage);
-    fetch('/group/' + slug + '/post', { method: 'POST', body: fd })
-        .then(r => r.json()).then(d => {
-            if (d.error) return flashToast(d.error);
-            location.reload();
-        });
-}
+    document.body.dataset.userName = '{{ (cu.display_name or cu.username) }}';
+    document.body.dataset.userId = '{{ cu.id }}';
+    {% if am_member %}
+    setTimeout(() => { initGroupChat({{ g.id }}); }, 50);
+    {% endif %}
 </script>
 {% endblock %}

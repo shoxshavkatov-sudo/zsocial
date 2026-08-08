@@ -267,7 +267,13 @@ textarea.input { resize: vertical; min-height: 80px; }
 .toggle.on::after { transform: translateX(18px); }
 
 /* ===== ЧАТ ===== */
-.chat-page { display:flex; height: calc(100vh - 72px); }
+.chat-page { display:flex; height: calc(100vh - 128px); margin-top:56px; }
+/* На мобиле нижний бар мешает — оставляем место и сверху (topbar) и снизу */
+@media (max-width:768px){
+    .chat-page { height: calc(100vh - 56px - 72px); }
+    /* Окно чата на мобиле — без отступа сверху, но не перекрываем topbar */
+    .chat-page.show-window .chat-window { position:fixed; top:56px; bottom:72px; left:0; right:0; z-index:90; }
+}
 .chat-list-panel { width:100%; max-width:340px; border-right:1px solid var(--border); display:flex; flex-direction:column; }
 @media (max-width:768px){ .chat-list-panel { max-width:100%; } .chat-page.show-window .chat-list-panel { display:none; } }
 .chat-list-header { padding:16px; border-bottom:1px solid var(--border); }
@@ -426,6 +432,7 @@ textarea.input { resize: vertical; min-height: 80px; }
     border-radius: 999px; min-width: 16px; text-align: center;
 }
 .topbar-item.active .tb-badge { background: var(--accent-contrast); color: var(--accent); }
+.topbar-theme { border-left: 1px solid var(--border); margin-left: 4px; }
 
 /* Адаптив: на узких экранах скрываем подписи, оставляем иконки */
 @media (max-width: 560px) {
@@ -879,4 +886,91 @@ html.theme-transitioning *::after {
 .page-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .page-head h2 { margin:0; }
 .page-head .btn { white-space:nowrap; }
+
+
+/* ===================================================================
+   ГРУППОВОЙ ЧАТ (как в Telegram) + ГОЛОСОВЫЕ КОМНАТЫ (как в Discord)
+   =================================================================== */
+.group-page { max-width: 800px; margin: 0 auto; padding: 8px 12px 80px; }
+
+/* Шапка группы */
+.group-head { display:flex; align-items:center; gap:12px; padding:8px 0 12px; }
+.group-head-avatar { width:44px; height:44px; border-radius:12px; object-fit:cover; }
+.group-head-info { flex:1; min-width:0; }
+.group-head-info h2 { margin:0; font-size:17px; font-weight:700; display:flex; align-items:center; gap:4px; }
+.group-head-meta { font-size:13px; color:var(--text-muted); }
+
+/* Промпт вступления */
+.group-join-prompt { text-align:center; padding:32px 16px; }
+.group-desc { color:var(--text-secondary); margin-bottom:16px; line-height:1.5; }
+
+/* Голосовые комнаты */
+.voice-create-bar { display:flex; gap:8px; margin-bottom:12px; }
+.voice-create-bar .input { flex:1; }
+.voice-rooms { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.voice-room { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.voice-room-head { display:flex; align-items:center; gap:8px; padding:10px 14px; cursor:pointer; transition:background .15s; }
+.voice-room-head:hover { background:var(--bg-hover); }
+.voice-room-head .icon { width:18px; height:18px; color:var(--text-muted); }
+.vr-name { flex:1; font-size:14px; font-weight:600; }
+.vr-count { background:var(--bg-muted); color:var(--text-secondary); font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; }
+.voice-room-body { padding:8px 14px 12px; border-top:1px solid var(--border); }
+.voice-participants { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.voice-participant { display:flex; align-items:center; gap:6px; background:var(--bg-muted); padding:4px 10px 4px 4px; border-radius:999px; }
+.voice-participant img { width:24px; height:24px; border-radius:50%; object-fit:cover; }
+.voice-participant span { font-size:13px; font-weight:500; }
+.vr-muted { color:var(--danger); }
+.vc-join { display:inline-flex; align-items:center; gap:4px; }
+.voice-controls { display:flex; gap:8px; }
+.vc-btn { width:40px; height:40px; border-radius:50%; border:none; background:var(--bg-muted); color:var(--text); cursor:pointer; display:grid; place-items:center; transition:all .15s; }
+.vc-btn:hover { background:var(--bg-hover); }
+.vc-btn.muted { background:var(--danger); color:#fff; }
+.vc-btn.vc-leave { background:var(--danger); color:#fff; }
+.vc-btn .icon { width:18px; height:18px; }
+
+/* Групповой чат */
+.group-chat-wrap { background:var(--bg-subtle); border:1px solid var(--border); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; height:55vh; min-height:360px; }
+.group-chat { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:4px; }
+.gc-empty { margin:auto; text-align:center; color:var(--text-muted); }
+.gc-empty .icon { margin-bottom:8px; }
+.gc-msg { display:flex; gap:8px; max-width:80%; animation:slideUp .25s ease; }
+.gc-msg.mine { align-self:flex-end; flex-direction:row-reverse; }
+.gc-avatar { width:32px; height:32px; border-radius:50%; object-fit:cover; flex-shrink:0; cursor:pointer; }
+.gc-bubble-wrap { min-width:0; }
+.gc-sender { font-size:12px; font-weight:700; color:var(--highlight); margin-bottom:2px; display:flex; align-items:center; gap:3px; }
+.gc-role { background:var(--accent); color:var(--accent-contrast); font-size:9px; padding:1px 5px; border-radius:4px; }
+.gc-text { background:var(--surface); border:1px solid var(--border); padding:8px 12px; border-radius:14px; border-top-left-radius:4px; font-size:14px; line-height:1.4; word-wrap:break-word; }
+.gc-msg.mine .gc-text { background:var(--accent); color:var(--accent-contrast); border-color:transparent; border-radius:14px; border-top-right-radius:4px; }
+.gc-text a { color:inherit; text-decoration:underline; }
+.gc-image, .gc-video { max-width:100%; border-radius:12px; margin-bottom:4px; cursor:pointer; }
+.gc-file { display:inline-flex; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--border); padding:8px 12px; border-radius:10px; font-size:13px; margin-bottom:4px; }
+.gc-meta { font-size:11px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; gap:6px; }
+.gc-msg.mine .gc-meta { justify-content:flex-end; }
+.gc-del { background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; }
+.gc-del:hover { color:var(--danger); }
+
+/* Индикатор печати группы */
+.group-typing { font-size:12px; color:var(--text-muted); padding:4px 14px; }
+.group-typing.hidden { display:none; }
+
+/* Поле ввода группы */
+.group-chat-input { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); background:var(--surface); }
+.group-chat-input input { flex:1; padding:10px 16px; border:1px solid var(--border); border-radius:999px; background:var(--bg); color:var(--text); font-size:14px; outline:none; }
+.group-chat-input input:focus { border-color:var(--highlight); }
+.gci-tool { width:38px; height:38px; border-radius:50%; border:none; background:var(--bg-muted); color:var(--text-secondary); cursor:pointer; display:grid; place-items:center; flex-shrink:0; }
+.gci-tool:hover { background:var(--bg-hover); }
+.gci-tool .icon { width:18px; height:18px; }
+
+/* Боковая инфа */
+.group-side-info { margin-top:16px; display:flex; flex-direction:column; gap:10px; }
+.gsi-desc { color:var(--text-secondary); font-size:14px; line-height:1.5; padding:12px; background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+.gsi-members { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); font-size:14px; }
+.gsi-members:hover { color:var(--highlight); }
+
+/* Адаптив */
+@media (max-width:560px) {
+    .group-page { padding:8px 8px 80px; }
+    .group-chat-wrap { height:calc(100vh - 380px); min-height:300px; }
+    .gc-msg { max-width:90%; }
+}
 

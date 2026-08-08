@@ -50,9 +50,9 @@ function applyTheme(t) {
 }
 function toggleTheme() {
     applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
-    // Обновить иконку
+    // Обновить иконку в верхнем баре (тема теперь в topbar)
     const cur = getTheme();
-    document.querySelectorAll('.bottombar-theme .icon use').forEach(u => {
+    document.querySelectorAll('.topbar-theme .icon use, .bottombar-theme .icon use').forEach(u => {
         u.setAttribute('href', '#i-' + (cur === 'dark' ? 'sun' : 'moon'));
     });
     // Подсветка кнопок в настройках
@@ -711,13 +711,18 @@ let callWithVideo = false;
 let callTimer = null;
 let callStartTime = 0;
 
-// STUN-серверы для NAT traversal (бесплатные, публичные Google)
+// ICE-серверы: STUN (для лёгких NAT) + TURN (для симметричного/жёсткого NAT,
+// например мобильные операторы). Используем бесплатный публичный relay OpenRelay.
 const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
+        // OpenRelay — бесплатный публичный TURN-сервер (для строгих NAT)
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
     ],
+    iceTransportPolicy: 'all',
 };
 
 function _ensureCallSocket() {
@@ -852,8 +857,11 @@ function _createPeerConnection() {
 }
 
 // ─── Входящий звонок (показываем окно «Входящий звонок») ───
+let pendingOffer = null;  // SDP offer от звонящего
+
 function _showIncomingCall(d) {
-    _showCallOverlay(true);
+    pendingOffer = d.sdp;  // сохраняем offer для acceptCall
+    _showCallOverlay();
     document.getElementById('call-status').textContent = 'Входящий ' + (callWithVideo ? 'видеозвонок' : 'звонок');
     document.getElementById('call-name').textContent = callPartnerName;
     document.getElementById('incoming-buttons').style.display = 'flex';
@@ -861,6 +869,7 @@ function _showIncomingCall(d) {
 }
 
 async function acceptCall() {
+    if (!pendingOffer) return;
     document.getElementById('incoming-buttons').style.display = 'none';
     document.getElementById('active-buttons').style.display = 'flex';
     _setStatus('Соединение...');
@@ -884,7 +893,7 @@ async function acceptCall() {
     localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
     try {
-        await pc.setRemoteDescription(new RTCSessionDescription(d_lastOffer.sdp));
+        await pc.setRemoteDescription(new RTCSessionDescription(pendingOffer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         chatSocket.emit('call_answer', { to: callPartnerId, sdp: answer });
@@ -895,18 +904,9 @@ async function acceptCall() {
     }
 }
 
-let d_lastOffer = null;
-function _showIncomingCall(d) {
-    d_lastOffer = d;
-    _showCallOverlay();
-    document.getElementById('call-status').textContent = 'Входящий ' + (callWithVideo ? 'видеозвонок' : 'звонок');
-    document.getElementById('call-name').textContent = callPartnerName;
-    document.getElementById('incoming-buttons').style.display = 'flex';
-    document.getElementById('active-buttons').style.display = 'none';
-}
-
 function rejectCall() {
     if (chatSocket) chatSocket.emit('call_reject', { to: callPartnerId });
+    pendingOffer = null;
     _hideCallOverlay();
 }
 
@@ -1003,3 +1003,362 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1000);
     setTimeout(() => clearInterval(tryBind), 10000);
 });
+
+
+// ===================================================================
+//  ГРУППОВОЙ ЧАТ (как в Telegram) + ГОЛОСОВЫЕ КОМНАТЫ (как в Discord)
+// ===================================================================
+let groupSocket = null;
+let currentGroupId = null;
+let groupTypingTimer = null;
+
+function initGroupChat(groupId) {
+    currentGroupId = groupId;
+    if (typeof io === 'undefined') return;
+
+    groupSocket = io();
+    groupSocket.emit('group_join', { group_id: groupId });
+
+    // Прокрутка вниз
+    const c = document.getElementById('group-chat');
+    if (c) c.scrollTop = c.scrollHeight;
+
+    // Новое сообщение группы
+    groupSocket.on('group_message', (d) => {
+        if (d.group_id !== groupId) return;
+        appendGroupMessage(d);
+        if (c) c.scrollTop = c.scrollHeight;
+        hideGroupTyping();
+    });
+
+    // Удаление сообщения
+    groupSocket.on('group_message_deleted', (d) => {
+        const el = document.getElementById('gcmsg-' + d.id);
+        if (el) el.remove();
+    });
+
+    // Индикатор печати
+    groupSocket.on('group_typing', (d) => {
+        if (d.from === document.body.dataset.userId) return;
+        showGroupTyping();
+    });
+    groupSocket.on('group_stop_typing', () => hideGroupTyping());
+
+    // === Голосовые комнаты: сигналинг ===
+    _bindVoiceEvents();
+}
+
+function sendGroupMessage(slug) {
+    const inp = document.getElementById('gc-text-input');
+    if (!inp) return;
+    const content = inp.value.trim();
+    if (!content) return;
+    inp.value = '';
+    if (groupSocket) groupSocket.emit('group_stop_typing', { group_id: currentGroupId });
+
+    const fd = new FormData();
+    fd.append('content', content);
+    fetch('/group/' + slug + '/chat/send', {
+        method: 'POST', body: fd,
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(d => {
+        if (d.error) flashToast(d.error);
+    }).catch(() => flashToast('Ошибка отправки'));
+}
+
+function sendGroupFile(slug, input) {
+    if (!input.files[0]) return;
+    const fd = new FormData();
+    fd.append('content', '');
+    fd.append('file', input.files[0]);
+    fetch('/group/' + slug + '/chat/send', {
+        method: 'POST', body: fd,
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(d => {
+        if (d.error) flashToast(d.error);
+        input.value = '';
+    });
+}
+
+function deleteGroupMsg(mid, slug) {
+    if (!confirm('Удалить сообщение?')) return;
+    fetch('/group/' + slug + '/chat/delete/' + mid, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(d => {
+        if (d.error) flashToast(d.error);
+    });
+}
+
+function appendGroupMessage(d) {
+    const c = document.getElementById('group-chat');
+    if (!c) return;
+    const me = document.body.dataset.userId;
+    const mine = (d.sender_id == me);
+    // убираем заглушку «нет сообщений»
+    const empty = c.querySelector('.gc-empty');
+    if (empty) empty.remove();
+
+    let mediaHTML = '';
+    if (d.msg_type === 'image' && d.file_url) {
+        mediaHTML = '<img class="gc-image" src="' + _mediaUrl(d.file_url) + '" onclick="openLightbox(\'' + _mediaUrl(d.file_url) + '\')">';
+    } else if (d.msg_type === 'video' && d.file_url) {
+        mediaHTML = '<video class="gc-video" src="' + _mediaUrl(d.file_url) + '" controls></video>';
+    } else if (d.msg_type === 'file' && d.file_url) {
+        mediaHTML = '<a class="gc-file" href="' + _mediaUrl(d.file_url) + '" download><svg class="icon"><use href="#i-file"/></svg><span>' + esc(d.file_name || 'Файл') + '</span></a>';
+    }
+
+    const div = document.createElement('div');
+    div.className = 'gc-msg' + (mine ? ' mine' : '');
+    div.id = 'gcmsg-' + d.id;
+    div.innerHTML = (mine ? '' : '<img class="gc-avatar" src="' + _mediaUrl(d.sender_avatar) + '">') +
+        '<div class="gc-bubble-wrap">' +
+        (mine ? '' : '<div class="gc-sender">' + esc(d.sender_name) + '</div>') +
+        mediaHTML +
+        (d.content ? '<div class="gc-text">' + _urlize(d.content) + '</div>' : '') +
+        '<div class="gc-meta">' + (d.created_at || 'сейчас') +
+        (mine ? ' <button class="gc-del" onclick="deleteGroupMsg(' + d.id + ',\'' + _slug() + '\')" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>' : '') +
+        '</div></div>';
+    c.appendChild(div);
+}
+
+function _mediaUrl(p) {
+    if (!p) return '';
+    if (p.startsWith('http') || p.startsWith('/')) return p;
+    if (p.startsWith('uploads/')) return '/' + p;
+    return '/static/' + p;
+}
+function _slug() {
+    const gp = document.querySelector('.group-page');
+    return gp ? gp.dataset.slug : '';
+}
+function _urlize(t) {
+    return esc(t).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+
+function notifyGroupTyping(gid) {
+    if (!groupSocket) return;
+    groupSocket.emit('group_typing', { group_id: gid, name: document.body.dataset.userName });
+    clearTimeout(groupTypingTimer);
+    groupTypingTimer = setTimeout(() => {
+        groupSocket.emit('group_stop_typing', { group_id: gid });
+    }, 1500);
+}
+function showGroupTyping() {
+    const t = document.getElementById('group-typing');
+    if (t) t.classList.remove('hidden');
+}
+function hideGroupTyping() {
+    const t = document.getElementById('group-typing');
+    if (t) t.classList.add('hidden');
+}
+
+function joinGroup(slug) {
+    fetch('/group/' + slug + '/join', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(() => location.reload());
+}
+function leaveGroup(slug) {
+    if (!confirm('Покинуть группу?')) return;
+    fetch('/group/' + slug + '/join', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(() => location.href = '/groups');
+}
+
+function createVoiceRoom(slug) {
+    const inp = document.getElementById('voice-room-name');
+    const name = (inp && inp.value.trim()) || 'Голосовая';
+    const fd = new FormData();
+    fd.append('name', name);
+    fetch('/group/' + slug + '/voice/create', {
+        method: 'POST', body: fd,
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
+    }).then(r => r.json()).then(d => {
+        if (d.error) return flashToast(d.error);
+        location.reload();
+    });
+}
+
+
+// ===================================================================
+//  ГОЛОСОВЫЕ КОМНАТЫ — WebRTC mesh (peer-to-peer между всеми)
+// ===================================================================
+let voiceSocket = null;       // переиспользуем groupSocket
+let voiceLocalStream = null;
+let voicePeers = {};          // { userId: RTCPeerConnection }
+let voiceCurrentRoom = null;
+let voiceMuted = false;
+
+function _bindVoiceEvents() {
+    if (!groupSocket || groupSocket._voiceBound) return;
+    groupSocket._voiceBound = true;
+    voiceSocket = groupSocket;
+
+    // Кто-то вошёл в комнату — инициируем к нему подключение
+    voiceSocket.on('voice_user_joined', (d) => {
+        if (!voiceCurrentRoom) return;
+        // Новый участник: мы шлём ему offer (мы = «инициатор»)
+        if (!voicePeers[d.user_id]) {
+            _createVoicePeer(d.user_id, true);
+        }
+    });
+
+    // Список уже присутствующих (при нашем входе)
+    voiceSocket.on('voice_peers', (d) => {
+        d.peers.forEach(p => {
+            if (!voicePeers[p.user_id]) _createVoicePeer(p.user_id, true);
+        });
+    });
+
+    // Кто-то вышел
+    voiceSocket.on('voice_user_left', (d) => {
+        _closeVoicePeer(d.user_id);
+        _removeVoiceParticipantEl(d.user_id);
+    });
+
+    // Сигнал от другого пира (offer/answer/ICE)
+    voiceSocket.on('voice_signal', (d) => {
+        _handleVoiceSignal(d.from, d.signal);
+    });
+
+    // Кто-то вкл/выкл микрофон
+    voiceSocket.on('voice_mute_changed', (d) => {
+        const el = document.querySelector('.voice-participant[data-uid="' + d.user_id + '"] .vr-muted');
+        if (d.muted && !el) {
+            const p = document.querySelector('.voice-participant[data-uid="' + d.user_id + '"]');
+            if (p) p.insertAdjacentHTML('beforeend', '<svg class="icon icon-sm vr-muted"><use href="#i-mic-off"/></svg>');
+        } else if (!d.muted && el) {
+            el.remove();
+        }
+    });
+}
+
+async function joinVoiceRoom(roomId) {
+    if (voiceCurrentRoom) leaveVoiceRoom(voiceCurrentRoom);
+    try {
+        voiceLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+        flashToast('Нет доступа к микрофону');
+        return;
+    }
+    voiceCurrentRoom = roomId;
+    voicePeers = {};
+    voiceMuted = false;
+    _bindVoiceEvents();
+    voiceSocket.emit('voice_join', { room_id: roomId, name: document.body.dataset.userName });
+    // Показываем панель управления
+    location.reload();
+}
+
+function leaveVoiceRoom(roomId) {
+    if (voiceSocket && roomId) {
+        voiceSocket.emit('voice_leave', { room_id: roomId });
+    }
+    Object.keys(voicePeers).forEach(uid => _closeVoicePeer(uid));
+    voicePeers = {};
+    if (voiceLocalStream) {
+        voiceLocalStream.getTracks().forEach(t => t.stop());
+        voiceLocalStream = null;
+    }
+    voiceCurrentRoom = null;
+    location.reload();
+}
+
+function toggleVoiceMute(roomId) {
+    voiceMuted = !voiceMuted;
+    if (voiceLocalStream) {
+        voiceLocalStream.getAudioTracks().forEach(t => t.enabled = !voiceMuted);
+    }
+    if (voiceSocket) voiceSocket.emit('voice_mute', { room_id: roomId, muted: voiceMuted });
+    const btn = document.getElementById('vc-mute-btn');
+    if (btn) {
+        btn.classList.toggle('muted', voiceMuted);
+        btn.querySelector('use').setAttribute('href', voiceMuted ? '#i-mic-off' : '#i-mic');
+    }
+}
+
+function _createVoicePeer(userId, isOfferer) {
+    if (!voiceLocalStream || voicePeers[userId]) return;
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    voicePeers[userId] = pc;
+
+    voiceLocalStream.getTracks().forEach(t => pc.addTrack(t, voiceLocalStream));
+
+    pc.onicecandidate = (e) => {
+        if (e.candidate && voiceSocket) {
+            voiceSocket.emit('voice_signal', { to: userId, signal: { ice: e.candidate } });
+        }
+    };
+    pc.ontrack = (e) => {
+        // Аудио от собеседника — просто проигрываем (элемент не виден)
+        let a = document.getElementById('voice-audio-' + userId);
+        if (!a) {
+            a = document.createElement('audio');
+            a.id = 'voice-audio-' + userId;
+            a.autoplay = true;
+            document.body.appendChild(a);
+        }
+        a.srcObject = e.streams[0];
+    };
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            _closeVoicePeer(userId);
+        }
+    };
+
+    if (isOfferer) {
+        pc.createOffer({ offerToReceiveAudio: true })
+            .then(o => pc.setLocalDescription(o))
+            .then(() => {
+                voiceSocket.emit('voice_signal', { to: userId, signal: { sdp: pc.localDescription } });
+            });
+    }
+    _addVoiceParticipantEl(userId);
+}
+
+async function _handleVoiceSignal(from, signal) {
+    let pc = voicePeers[from];
+    if (!pc) {
+        // Кто-то шлёт нам сигнал — создаём пир как отвечающую сторону
+        _createVoicePeer(from, false);
+        pc = voicePeers[from];
+    }
+    if (!pc) return;
+    try {
+        if (signal.sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            if (signal.sdp.type === 'offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                voiceSocket.emit('voice_signal', { to: from, signal: { sdp: pc.localDescription } });
+            }
+        } else if (signal.ice) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(signal.ice)); } catch (e) {}
+        }
+    } catch (e) { console.error('voice signal error:', e); }
+}
+
+function _closeVoicePeer(userId) {
+    const pc = voicePeers[userId];
+    if (pc) { try { pc.close(); } catch (e) {} delete voicePeers[userId]; }
+    const a = document.getElementById('voice-audio-' + userId);
+    if (a) a.remove();
+}
+
+function _addVoiceParticipantEl(userId) {
+    const list = document.getElementById('vr-participants-' + voiceCurrentRoom);
+    if (!list) return;
+    if (list.querySelector('[data-uid="' + userId + '"]')) return;
+    const name = 'Пользователь ' + userId;
+    const div = document.createElement('div');
+    div.className = 'voice-participant';
+    div.dataset.uid = userId;
+    div.innerHTML = '<img src="/static/img/default_avatar.svg" alt=""><span>' + esc(name) + '</span>';
+    list.appendChild(div);
+}
+function _removeVoiceParticipantEl(userId) {
+    const el = document.querySelector('.voice-participant[data-uid="' + userId + '"]');
+    if (el) el.remove();
+}

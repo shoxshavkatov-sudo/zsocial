@@ -171,6 +171,38 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS group_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        msg_type TEXT DEFAULT 'text',
+        file_url TEXT,
+        file_name TEXT,
+        file_size INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+        FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS voice_rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL,
+        name TEXT NOT NULL DEFAULT 'Голосовая',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS voice_room_state (
+        room_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        muted INTEGER DEFAULT 0,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (room_id, user_id),
+        FOREIGN KEY (room_id) REFERENCES voice_rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS polls (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL,
@@ -355,6 +387,35 @@ def migrate_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(post_id, user_id),
             FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+        )'''),
+        ('group_messages', '''CREATE TABLE IF NOT EXISTS group_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            msg_type TEXT DEFAULT 'text',
+            file_url TEXT,
+            file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+        )'''),
+        ('voice_rooms', '''CREATE TABLE IF NOT EXISTS voice_rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT 'Голосовая',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+        )'''),
+        ('voice_room_state', '''CREATE TABLE IF NOT EXISTS voice_room_state (
+            room_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            muted INTEGER DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (room_id, user_id),
+            FOREIGN KEY (room_id) REFERENCES voice_rooms(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )'''),
     ]:
         if tname not in tables:
@@ -1090,6 +1151,110 @@ class Group:
     def get_posts(gid):
         db = get_db()
         return db.execute(Post._feed_where('AND p.group_id = ?'), (gid,)).fetchall()
+
+
+class GroupMessage:
+    """Сообщения в групповом чате (как в Telegram)."""
+
+    @staticmethod
+    def create(group_id, sender_id, content, msg_type='text', file_url=None,
+               file_name=None, file_size=0):
+        db = get_db()
+        cur = db.execute(
+            'INSERT INTO group_messages (group_id, sender_id, content, msg_type, file_url, file_name, file_size) '
+            'VALUES (?,?,?,?,?,?,?)',
+            (group_id, sender_id, content, msg_type, file_url, file_name, file_size))
+        db.commit()
+        return cur.lastrowid
+
+    @staticmethod
+    def get_recent(group_id, limit=100):
+        """Последние N сообщений группы (с данными отправителя)."""
+        db = get_db()
+        return db.execute('''
+            SELECT gm.*, u.username, u.display_name, u.avatar, u.verified, u.role
+            FROM group_messages gm JOIN users u ON gm.sender_id=u.id
+            WHERE gm.group_id=? ORDER BY gm.created_at ASC LIMIT ?
+        ''', (group_id, limit)).fetchall()
+
+    @staticmethod
+    def delete(mid, uid):
+        """Удаление (только автор или админ)."""
+        db = get_db()
+        msg = db.execute('SELECT sender_id FROM group_messages WHERE id=?', (mid,)).fetchone()
+        if not msg:
+            return False
+        user = db.execute('SELECT role FROM users WHERE id=?', (uid,)).fetchone()
+        if msg['sender_id'] != uid and (not user or user['role'] != 'admin'):
+            return False
+        db.execute('DELETE FROM group_messages WHERE id=?', (mid,))
+        db.commit()
+        return True
+
+
+class VoiceRoom:
+    """Голосовые комнаты (как в Discord) — управляют состоянием участников.
+    Сам WebRTC-аудио идёт peer-to-peer (mesh) через Socket.IO сигналинг."""
+
+    @staticmethod
+    def create(group_id, name='Голосовая'):
+        db = get_db()
+        cur = db.execute('INSERT INTO voice_rooms (group_id, name) VALUES (?,?)',
+                         (group_id, name))
+        db.commit()
+        return cur.lastrowid
+
+    @staticmethod
+    def get_by_group(group_id):
+        db = get_db()
+        return db.execute('''
+            SELECT vr.*,
+                   (SELECT COUNT(*) FROM voice_room_state WHERE room_id=vr.id) as participants_count
+            FROM voice_rooms vr WHERE vr.group_id=? ORDER BY vr.created_at ASC
+        ''', (group_id,)).fetchall()
+
+    @staticmethod
+    def get(room_id):
+        db = get_db()
+        return db.execute('SELECT * FROM voice_rooms WHERE id=?', (room_id,)).fetchone()
+
+    @staticmethod
+    def get_participants(room_id):
+        db = get_db()
+        return db.execute('''
+            SELECT vrs.user_id, vrs.muted, u.username, u.display_name, u.avatar
+            FROM voice_room_state vrs JOIN users u ON vrs.user_id=u.id
+            WHERE vrs.room_id=? ORDER BY vrs.joined_at ASC
+        ''', (room_id,)).fetchall()
+
+    @staticmethod
+    def join(room_id, uid):
+        db = get_db()
+        db.execute('INSERT OR IGNORE INTO voice_room_state (room_id, user_id) VALUES (?,?)',
+                   (room_id, uid))
+        db.commit()
+
+    @staticmethod
+    def leave(room_id, uid):
+        db = get_db()
+        db.execute('DELETE FROM voice_room_state WHERE room_id=? AND user_id=?', (room_id, uid))
+        db.commit()
+
+    @staticmethod
+    def set_muted(room_id, uid, muted):
+        db = get_db()
+        db.execute('UPDATE voice_room_state SET muted=? WHERE room_id=? AND user_id=?',
+                   (1 if muted else 0, room_id, uid))
+        db.commit()
+
+    @staticmethod
+    def leave_all_rooms(uid):
+        """Покинуть все голосовые комнаты (при выходе)."""
+        db = get_db()
+        rows = db.execute('SELECT room_id FROM voice_room_state WHERE user_id=?', (uid,)).fetchall()
+        db.execute('DELETE FROM voice_room_state WHERE user_id=?', (uid,))
+        db.commit()
+        return [r['room_id'] for r in rows]
 
 
 class SiteSettings:
