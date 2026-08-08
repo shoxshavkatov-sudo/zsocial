@@ -261,6 +261,7 @@ def inject_globals():
                 site=site,
                 v=APP_VERSION,
                 media_url=media_url,
+                _media_for=_media_for,
                 is_online=is_online,
                 poll_for=poll_for,
                 has_voted=has_voted,
@@ -991,6 +992,66 @@ def handle_stop_typing(data):
     to = (data or {}).get('to')
     if to:
         emit('stop_typing', {'from': session['user_id']}, room=f'user_{to}')
+
+
+# ==================== ВЕБ-ЗВОНКИ (WebRTC сигналинг) ====================
+def _call_peer(data):
+    """Достаём адресата из payload и проверяем сессию."""
+    if 'user_id' not in session:
+        return None
+    to = (data or {}).get('to')
+    return to if to else None
+
+
+@socketio.on('call_offer')
+def handle_call_offer(data):
+    """Инициатор звонка шлёт offer (SDP) получателю."""
+    to = _call_peer(data)
+    if to:
+        emit('call_offer', {
+            'from': session['user_id'],
+            'from_name': (data or {}).get('from_name', ''),
+            'video': (data or {}).get('video', False),
+            'sdp': (data or {}).get('sdp'),
+        }, room=f'user_{to}')
+
+
+@socketio.on('call_answer')
+def handle_call_answer(data):
+    """Ответ принимающей стороны (SDP)."""
+    to = _call_peer(data)
+    if to:
+        emit('call_answer', {
+            'from': session['user_id'],
+            'sdp': (data or {}).get('sdp'),
+        }, room=f'user_{to}')
+
+
+@socketio.on('call_ice')
+def handle_call_ice(data):
+    """Обмен ICE-кандидатами (NAT traversal)."""
+    to = _call_peer(data)
+    if to:
+        emit('call_ice', {
+            'from': session['user_id'],
+            'candidate': (data or {}).get('candidate'),
+        }, room=f'user_{to}')
+
+
+@socketio.on('call_end')
+def handle_call_end(data):
+    """Сброс звонка любой из сторон."""
+    to = _call_peer(data)
+    if to:
+        emit('call_end', {'from': session['user_id']}, room=f'user_{to}')
+
+
+@socketio.on('call_reject')
+def handle_call_reject(data):
+    """Отклонение входящего звонка."""
+    to = _call_peer(data)
+    if to:
+        emit('call_reject', {'from': session['user_id']}, room=f'user_{to}')
 
 
 # ==================== 404 ====================

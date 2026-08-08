@@ -46,6 +46,14 @@
                 <strong>{{ partner.display_name or partner.username }} {% if partner.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</strong>
                 <span>@{{ partner.username }}</span>
             </div>
+            <div class="call-actions">
+                <button class="call-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', false)" title="Голосовой звонок">
+                    <svg class="icon"><use href="#i-phone"/></svg>
+                </button>
+                <button class="call-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', true)" title="Видеозвонок">
+                    <svg class="icon"><use href="#i-video"/></svg>
+                </button>
+            </div>
         </div>
 
         <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
@@ -156,14 +164,53 @@
         {% endif %}
     </div>
 </div>
+
+{# === Overlay для звонков (видео/голос) === #}
+<div class="call-overlay" id="call-overlay">
+    <div class="call-stage">
+        <video id="remote-video" class="call-video remote" autoplay playsinline></video>
+        <video id="local-video" class="call-video local" autoplay playsinline muted></video>
+        <audio id="remote-audio" autoplay></audio>
+        <div class="call-avatar" id="avatar-call">
+            <svg class="icon icon-xl"><use href="#i-user"/></svg>
+        </div>
+    </div>
+    <div class="call-info-panel">
+        <div class="call-name" id="call-name">Собеседник</div>
+        <div class="call-type" id="call-type">Голосовой звонок</div>
+        <div class="call-status" id="call-status">Соединение...</div>
+        <div class="call-timer" id="call-timer">00:00</div>
+    </div>
+    <div class="call-controls" id="active-buttons">
+        <button class="call-ctrl" id="btn-mic-toggle" onclick="toggleMic()" title="Микрофон">
+            <svg class="icon"><use href="#i-mic"/></svg>
+        </button>
+        <button class="call-ctrl" id="btn-cam-toggle" onclick="toggleCam()" title="Камера">
+            <svg class="icon"><use href="#i-video"/></svg>
+        </button>
+        <button class="call-ctrl call-hangup" onclick="endCall()" title="Завершить">
+            <svg class="icon"><use href="#i-phone-off"/></svg>
+        </button>
+    </div>
+    <div class="call-controls incoming-controls" id="incoming-buttons" style="display:none">
+        <button class="call-ctrl call-decline" onclick="rejectCall()" title="Отклонить">
+            <svg class="icon"><use href="#i-phone-off"/></svg>
+        </button>
+        <button class="call-ctrl call-accept" onclick="acceptCall()" title="Принять">
+            <svg class="icon"><use href="#i-phone"/></svg>
+        </button>
+    </div>
+</div>
 {% endblock %}
 {% block scripts %}
 {% if partner %}
 <script>
+    document.body.dataset.userName = '{{ (cu.display_name or cu.username)|replace("'", "\\'") }}';
     setTimeout(() => {
         const c = document.getElementById('chat-messages');
         if (c) c.scrollTop = c.scrollHeight;
         initSocket({{ cu.id }}, {{ partner.id }});
+        _registerCallListeners();
     }, 50);
 </script>
 {% endif %}

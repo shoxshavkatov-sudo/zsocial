@@ -703,3 +703,127 @@ html.theme-transitioning *::after {
 
 /* Кнопка опроса активна */
 #poll-toggle-btn.active { color:var(--highlight); background:var(--bg-hover); }
+
+
+/* ===================================================================
+   ВЕБ-ЗВОНКИ (голосовые + видеозвонки)
+   =================================================================== */
+
+/* Кнопки звонка в шапке чата */
+.call-actions { display:flex; gap:4px; margin-left:auto; }
+.call-btn {
+    width:38px; height:38px; border-radius:50%; border:none;
+    display:grid; place-items:center; cursor:pointer;
+    background:transparent; color:var(--text-secondary);
+    transition:all .2s;
+}
+.call-btn:hover { background:var(--bg-hover); color:var(--highlight); }
+.call-btn .icon { width:20px; height:20px; }
+
+/* Overlay звонка на весь экран */
+.call-overlay {
+    position:fixed; inset:0; z-index:9999;
+    background:#0a0a0a; color:#fff;
+    display:none; flex-direction:column;
+    opacity:0; transition:opacity .25s;
+}
+.call-overlay.active { display:flex; opacity:1; }
+
+.call-stage {
+    flex:1; position:relative; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 40%, #1a1a1a, #050505);
+}
+
+/* Видео собеседника (на весь экран) */
+.call-video.remote {
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:none;
+    background:#000;
+}
+
+/* Моё видео (картинка-в-картинке, нижний правый угол) */
+.call-video.local {
+    position:absolute; bottom:90px; right:16px;
+    width:120px; height:160px; border-radius:14px;
+    object-fit:cover; display:none;
+    border:2px solid rgba(255,255,255,.25);
+    background:#222; z-index:2;
+    transform:scaleX(-1);  /* зеркальное селфи */
+}
+
+/* Аватар при голосовом звонке (без видео) */
+.call-avatar {
+    width:128px; height:128px; border-radius:50%;
+    background:linear-gradient(135deg, var(--highlight), #6366f1);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 60px rgba(99,102,241,.4);
+    animation:pulseAvatar 2s ease-in-out infinite;
+}
+.call-avatar .icon { width:64px; height:64px; color:#fff; }
+@keyframes pulseAvatar {
+    0%,100% { transform:scale(1); box-shadow:0 0 60px rgba(99,102,241,.4); }
+    50% { transform:scale(1.05); box-shadow:0 0 90px rgba(99,102,241,.6); }
+}
+
+/* Информация о звонке (имя, статус, таймер) */
+.call-info-panel {
+    position:absolute; top:0; left:0; right:0;
+    padding:32px 20px 16px; text-align:center;
+    background:linear-gradient(180deg, rgba(0,0,0,.6), transparent);
+    z-index:3; pointer-events:none;
+}
+.call-name { font-size:22px; font-weight:700; margin-bottom:4px; }
+.call-type { font-size:13px; color:rgba(255,255,255,.6); margin-bottom:2px; }
+.call-status { font-size:14px; color:rgba(255,255,255,.8); }
+.call-timer { font-size:13px; color:var(--highlight); font-variant-numeric:tabular-nums; margin-top:4px; }
+
+/* Кнопки управления звонком */
+.call-controls {
+    position:absolute; bottom:32px; left:0; right:0;
+    display:flex; justify-content:center; gap:20px;
+    z-index:4; padding:0 16px;
+}
+.call-ctrl {
+    width:60px; height:60px; border-radius:50%;
+    border:none; cursor:pointer; display:grid; place-items:center;
+    background:rgba(255,255,255,.15); color:#fff;
+    backdrop-filter:blur(10px);
+    transition:all .2s;
+}
+.call-ctrl:hover { background:rgba(255,255,255,.25); transform:translateY(-2px); }
+.call-ctrl .icon { width:26px; height:26px; }
+.call-ctrl.off { background:rgba(239,68,68,.85); }
+
+/* Красная кнопка завершения */
+.call-hangup, .call-decline {
+    background:#ef4444;
+}
+.call-hangup:hover, .call-decline:hover { background:#dc2626; }
+.call-hangup .icon, .call-decline .icon { transform:rotate(135deg); }
+
+/* Зелёная кнопка принятия */
+.call-accept { background:#22c55e; }
+.call-accept:hover { background:#16a34a; }
+.call-accept .icon { transform:none; }
+
+.incoming-controls { gap:48px; }
+
+/* Адаптив для маленьких экранов */
+@media (max-width:480px) {
+    .call-video.local { width:90px; height:120px; bottom:100px; right:10px; }
+    .call-ctrl { width:52px; height:52px; }
+    .call-ctrl .icon { width:22px; height:22px; }
+    .call-name { font-size:19px; }
+    .call-avatar { width:104px; height:104px; }
+    .call-avatar .icon { width:52px; height:52px; }
+}
+
+
+/* ===================================================================
+   Шапка страницы групп (кнопка «Создать группу»)
+   =================================================================== */
+.page-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.page-head h2 { margin:0; }
+.page-head .btn { white-space:nowrap; }
+

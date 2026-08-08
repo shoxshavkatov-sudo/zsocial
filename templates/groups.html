@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Группы{% endblock %}
-{% block content %}
+{% block body %}
 <div class="container" style="padding:16px 16px 80px">
-    <h2 style="margin:0 0 16px">Группы</h2>
-    <a href="{{ url_for('create_group') }}" class="btn btn-primary" style="margin-bottom:16px">+ Создать группу</a>
+    <div class="page-head" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <h2 style="margin:0">Группы</h2>
+        <a href="{{ url_for('create_group') }}" class="btn btn-primary"><svg class="icon icon-sm"><use href="#i-plus"/></svg> Создать группу</a>
+    </div>
 
     {% if my_groups %}
     <h3>Мои группы</h3>

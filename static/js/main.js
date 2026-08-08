@@ -696,3 +696,310 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { f.style.opacity = '0'; f.style.transition = 'opacity .4s'; setTimeout(() => f.remove(), 400); }, 3500);
     });
 });
+
+
+// ===================================================================
+//  ВЕБ-ЗВОНКИ (WebRTC + Socket.IO сигналинг)
+//  Голосовые и видеозвонки 1-на-1 прямо из чата.
+// ===================================================================
+let pc = null;           // RTCPeerConnection
+let localStream = null;  // моя камера/микрофон
+let callPartnerId = null;
+let callPartnerName = '';
+let isCaller = false;
+let callWithVideo = false;
+let callTimer = null;
+let callStartTime = 0;
+
+// STUN-серверы для NAT traversal (бесплатные, публичные Google)
+const ICE_SERVERS = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+    ],
+};
+
+function _ensureCallSocket() {
+    // сокет чата уже создан в initSocket — переиспользуем его для звонков
+    if (!chatSocket && typeof io !== 'undefined') {
+        chatSocket = io();
+        _registerCallListeners();
+    } else if (chatSocket && !chatSocket._callBound) {
+        _registerCallListeners();
+    }
+}
+
+function _registerCallListeners() {
+    if (!chatSocket) return;
+    chatSocket._callBound = true;
+
+    // Входящий звонок
+    chatSocket.on('call_offer', (d) => {
+        if (document.getElementById('call-overlay') && document.getElementById('call-overlay').classList.contains('active')) {
+            // уже в звонке — отклоняем
+            chatSocket.emit('call_reject', { to: d.from });
+            return;
+        }
+        isCaller = false;
+        callPartnerId = d.from;
+        callPartnerName = d.from_name || 'Пользователь';
+        callWithVideo = d.video;
+        _showIncomingCall(d);
+    });
+
+    // Ответ (приняли мой offer)
+    chatSocket.on('call_answer', async (d) => {
+        if (!pc) return;
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription(d.sdp));
+            _setStatus('Соединение установлено');
+            _startCallTimer();
+        } catch (e) { console.error('setRemoteDescription (answer):', e); }
+    });
+
+    // ICE-кандидат от собеседника
+    chatSocket.on('call_ice', async (d) => {
+        if (pc && d.candidate) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch (e) {}
+        }
+    });
+
+    // Завершение звонка собеседником
+    chatSocket.on('call_end', () => _endCall('remote'));
+    // Отклонение звонка
+    chatSocket.on('call_reject', () => {
+        _endCall('rejected');
+        flashToast('Звонок отклонён');
+    });
+}
+
+// ─── Инициация звонка ───
+async function startCall(partnerId, partnerName, video) {
+    if (!chatSocket) { flashToast('Нет соединения'); return; }
+    if (document.getElementById('call-overlay')?.classList.contains('active')) return;
+
+    callPartnerId = partnerId;
+    callPartnerName = partnerName || 'Собеседник';
+    callWithVideo = !!video;
+    isCaller = true;
+
+    _showCallOverlay();
+    _setStatus('Звоним...');
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: callWithVideo ? { width: 640, height: 480 } : false,
+        });
+    } catch (e) {
+        flashToast('Нет доступа к ' + (callWithVideo ? 'камере/микрофону' : 'микрофону'));
+        _hideCallOverlay();
+        return;
+    }
+
+    // Показываем локальное видео
+    const lv = document.getElementById('local-video');
+    if (lv) { lv.srcObject = localStream; lv.style.display = callWithVideo ? 'block' : 'none'; }
+
+    _createPeerConnection();
+
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+    try {
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callWithVideo });
+        await pc.setLocalDescription(offer);
+        chatSocket.emit('call_offer', {
+            to: partnerId,
+            from_name: document.body.dataset.userName || 'Я',
+            video: callWithVideo,
+            sdp: offer,
+        });
+    } catch (e) {
+        console.error('createOffer:', e);
+        _endCall('error');
+    }
+}
+
+function _createPeerConnection() {
+    pc = new RTCPeerConnection(ICE_SERVERS);
+
+    // Отправляем свои ICE-кандидаты
+    pc.onicecandidate = (e) => {
+        if (e.candidate && chatSocket) {
+            chatSocket.emit('call_ice', { to: callPartnerId, candidate: e.candidate });
+        }
+    };
+
+    // Поток собеседника (видео/аудио)
+    pc.ontrack = (e) => {
+        const rv = document.getElementById('remote-video');
+        const ra = document.getElementById('remote-audio');
+        if (rv && e.streams[0]) {
+            rv.srcObject = e.streams[0];
+            if (callWithVideo) rv.style.display = 'block';
+        }
+        if (ra && e.streams[0]) ra.srcObject = e.streams[0];
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+            _setStatus('В разговоре');
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            _endCall('failed');
+        }
+    };
+}
+
+// ─── Входящий звонок (показываем окно «Входящий звонок») ───
+function _showIncomingCall(d) {
+    _showCallOverlay(true);
+    document.getElementById('call-status').textContent = 'Входящий ' + (callWithVideo ? 'видеозвонок' : 'звонок');
+    document.getElementById('call-name').textContent = callPartnerName;
+    document.getElementById('incoming-buttons').style.display = 'flex';
+    document.getElementById('active-buttons').style.display = 'none';
+}
+
+async function acceptCall() {
+    document.getElementById('incoming-buttons').style.display = 'none';
+    document.getElementById('active-buttons').style.display = 'flex';
+    _setStatus('Соединение...');
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: callWithVideo ? { width: 640, height: 480 } : false,
+        });
+    } catch (e) {
+        flashToast('Нет доступа к ' + (callWithVideo ? 'камере/микрофону' : 'микрофону'));
+        chatSocket.emit('call_reject', { to: callPartnerId });
+        _hideCallOverlay();
+        return;
+    }
+
+    const lv = document.getElementById('local-video');
+    if (lv) { lv.srcObject = localStream; lv.style.display = callWithVideo ? 'block' : 'none'; }
+
+    _createPeerConnection();
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+    try {
+        await pc.setRemoteDescription(new RTCSessionDescription(d_lastOffer.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        chatSocket.emit('call_answer', { to: callPartnerId, sdp: answer });
+        _startCallTimer();
+    } catch (e) {
+        console.error('acceptCall:', e);
+        _endCall('error');
+    }
+}
+
+let d_lastOffer = null;
+function _showIncomingCall(d) {
+    d_lastOffer = d;
+    _showCallOverlay();
+    document.getElementById('call-status').textContent = 'Входящий ' + (callWithVideo ? 'видеозвонок' : 'звонок');
+    document.getElementById('call-name').textContent = callPartnerName;
+    document.getElementById('incoming-buttons').style.display = 'flex';
+    document.getElementById('active-buttons').style.display = 'none';
+}
+
+function rejectCall() {
+    if (chatSocket) chatSocket.emit('call_reject', { to: callPartnerId });
+    _hideCallOverlay();
+}
+
+// ─── Завершение звонка ───
+function endCall() { _endCall('local'); }
+
+function _endCall(reason) {
+    if (chatSocket && callPartnerId && reason !== 'remote') {
+        chatSocket.emit('call_end', { to: callPartnerId });
+    }
+    if (callTimer) { clearInterval(callTimer); callTimer = null; }
+    if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+    }
+    callPartnerId = null;
+    _hideCallOverlay();
+}
+
+// ─── Управление: вкл/выкл микрофон и камеру ───
+let micEnabled = true;
+let camEnabled = true;
+function toggleMic() {
+    if (!localStream) return;
+    micEnabled = !micEnabled;
+    localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
+    const btn = document.getElementById('btn-mic-toggle');
+    if (btn) {
+        btn.classList.toggle('off', !micEnabled);
+        btn.querySelector('use').setAttribute('href', micEnabled ? '#i-mic' : '#i-mic-off');
+    }
+}
+function toggleCam() {
+    if (!localStream || !callWithVideo) return;
+    camEnabled = !camEnabled;
+    localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
+    const btn = document.getElementById('btn-cam-toggle');
+    if (btn) btn.classList.toggle('off', !camEnabled);
+    const lv = document.getElementById('local-video');
+    if (lv) lv.style.opacity = camEnabled ? '1' : '0.2';
+}
+
+// ─── UI оверлея ───
+function _showCallOverlay() {
+    let ov = document.getElementById('call-overlay');
+    if (!ov) {
+        // динамически создаём, если отсутствует (другая страница)
+        return;
+    }
+    ov.classList.add('active');
+    document.getElementById('call-name').textContent = callPartnerName || 'Собеседник';
+    document.getElementById('call-type').textContent = callWithVideo ? 'Видеозвонок' : 'Голосовой звонок';
+    document.getElementById('remote-video').style.display = callWithVideo ? 'block' : 'none';
+    document.getElementById('local-video').style.display = callWithVideo ? 'block' : 'none';
+    document.getElementById('avatar-call').style.display = callWithVideo ? 'none' : 'flex';
+    document.getElementById('call-timer').textContent = '00:00';
+    document.getElementById('incoming-buttons').style.display = 'none';
+    document.getElementById('active-buttons').style.display = 'flex';
+}
+function _hideCallOverlay() {
+    const ov = document.getElementById('call-overlay');
+    if (ov) ov.classList.remove('active');
+    if (callTimer) { clearInterval(callTimer); callTimer = null; }
+    const rv = document.getElementById('remote-video');
+    const lv = document.getElementById('local-video');
+    if (rv) rv.srcObject = null;
+    if (lv) lv.srcObject = null;
+}
+function _setStatus(txt) {
+    const el = document.getElementById('call-status');
+    if (el) el.textContent = txt;
+}
+function _startCallTimer() {
+    callStartTime = Date.now();
+    callTimer = setInterval(() => {
+        const s = Math.floor((Date.now() - callStartTime) / 1000);
+        const m = Math.floor(s / 60).toString().padStart(2, '0');
+        const ss = (s % 60).toString().padStart(2, '0');
+        const el = document.getElementById('call-timer');
+        if (el) el.textContent = m + ':' + ss;
+    }, 1000);
+}
+
+// Авто-привязка слушателей звонков к сокету (если чат-страница)
+document.addEventListener('DOMContentLoaded', () => {
+    // initSocket уже вызывается в chat.html; слушатели навешиваются там же.
+    // Эта подушка добавляет listener-ы, если сокет создан позже.
+    const tryBind = setInterval(() => {
+        if (chatSocket && !chatSocket._callBound) {
+            _registerCallListeners();
+            clearInterval(tryBind);
+        }
+    }, 1000);
+    setTimeout(() => clearInterval(tryBind), 10000);
+});
