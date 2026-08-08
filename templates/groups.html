@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Группы{% endblock %}
+{% block content %}
+<div class="container" style="padding:16px 16px 80px">
+    <h2 style="margin:0 0 16px">Группы</h2>
+    <a href="{{ url_for('create_group') }}" class="btn btn-primary" style="margin-bottom:16px">+ Создать группу</a>
+
+    {% if my_groups %}
+    <h3>Мои группы</h3>
+    <div class="groups-grid" style="margin-bottom:24px">
+    {% for g in my_groups %}
+        <div class="group-card" onclick="location.href='/group/{{ g.slug }}'">
+            <img class="group-card-cover" src="{{ _media_for(g.cover) }}" alt="">
+            <div class="group-card-info">
+                <h3>{{ g.name }}</h3>
+                <div class="g-slug">@{{ g.slug }}</div>
+                {% if g.description %}<div class="g-desc">{{ g.description }}</div>{% endif %}
+                <div class="g-meta">{{ g.member_count }} участников</div>
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if all_groups %}
+    <h3>Все группы</h3>
+    <div class="groups-grid">
+    {% for g in all_groups %}
+        <div class="group-card" onclick="location.href='/group/{{ g.slug }}'">
+            <img class="group-card-cover" src="{{ _media_for(g.cover) }}" alt="">
+            <div class="group-card-info">
+                <h3>{{ g.name }}</h3>
+                <div class="g-slug">@{{ g.slug }} · {{ g.owner_name }}</div>
+                {% if g.description %}<div class="g-desc">{{ g.description }}</div>{% endif %}
+                <div class="g-meta">{{ g.member_count }} участников</div>
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><svg class="icon empty-icon"><use href="#i-users"/></svg><p>Пока нет групп</p></div>
+    {% endif %}
+</div>
+{% endblock %}

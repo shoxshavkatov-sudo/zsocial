@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Участники — {{ g.name }}{% endblock %}
+{% block content %}
+<div style="padding:16px">
+    <a href="/group/{{ g.slug }}" style="font-size:13px;color:var(--highlight)">&larr; Назад</a>
+    <h2 style="margin:8px 0 16px">{{ g.name }} — участники</h2>
+    <div class="members-grid">
+    {% for m in members %}
+        <div class="member-card" onclick="location.href='/profile/{{ m.username }}'">
+            <img src="{{ _media_for(m.avatar) }}" alt="">
+            <div>
+                <div class="m-name">{{ m.display_name or m.username }}{% if m.verified %} <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</div>
+                <div class="m-role">{{ m.role }}</div>
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+    {% if not members %}
+    <div class="empty-state"><p>Пока нет участников</p></div>
+    {% endif %}
+</div>
+{% endblock %}

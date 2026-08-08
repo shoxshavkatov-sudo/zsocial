@@ -9,13 +9,17 @@ from flask import (
     session, flash, jsonify, send_from_directory
 )
 from flask_socketio import SocketIO, emit, join_room
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
 import uuid
 
 from config import Config
 from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
-    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, SiteSettings
+    is_online,
+    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, SiteSettings
 )
 import mailer
 
@@ -29,8 +33,41 @@ except ImportError:
     _async = 'threading'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async)
 
+# CSRF защита (формы + AJAX). Socket.IO не использует CSRF (engineio path).
+csrf = CSRFProtect(app)
+# Исключаем WebSocket-эндпоинт из CSRF
+csrf.exempt(__name__)  # no-op; Socket.IO обрабатывается middleware, не Flask-роутами
+
+# Rate limiting (in-memory). На production стоит заменить на Redis storage,
+# но для free-tier Render in-memory приемлемо.
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=[],  # без глобальных лимитов — только явные на роутах
+    storage_uri="memory://",
+)
+
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 app.teardown_appcontext(close_db)
+
+
+@app.before_request
+def update_last_seen():
+    """Обновляет last_seen пользователя (раз в 60с, чтобы не писать в БД на каждый запрос)."""
+    if 'user_id' not in session:
+        return
+    import time
+    now = time.time()
+    last = session.get('_last_seen_ts', 0)
+    if now - last > 60:
+        from models import get_db as _get_db
+        try:
+            db = _get_db()
+            db.execute("UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (session['user_id'],))
+            db.commit()
+        except Exception:
+            pass
+        session['_last_seen_ts'] = now
 
 
 @app.route('/uploads/<path:filename>')
@@ -210,7 +247,8 @@ def inject_globals():
                 site_desc=site.get('site_desc', ''),
                 site=site,
                 v=APP_VERSION,
-                media_url=media_url)
+                media_url=media_url,
+                is_online=is_online)
 
 
 @app.context_processor
@@ -231,6 +269,7 @@ def index():
 
 
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("3/hour", methods=['POST'])
 def register():
     if 'user_id' in session:
         return redirect(url_for('feed'))
@@ -261,6 +300,7 @@ def register():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("8/minute", methods=['POST'])
 def login():
     if 'user_id' in session:
         return redirect(url_for('feed'))
@@ -293,19 +333,24 @@ def logout():
 def feed():
     tab = request.args.get('tab', 'all')
     tag = request.args.get('tag', '').strip()
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = 20
     if tab == 'following':
-        posts = Post.get_following_feed(session['user_id'], tag=tag or None)
+        posts, total = Post.get_following_feed(session['user_id'], page=page, per_page=per_page, tag=tag or None)
     else:
-        posts = Post.get_all(tag=tag or None)
+        posts, total = Post.get_all(page=page, per_page=per_page, tag=tag or None)
     liked = {p['id'] for p in posts if Like.is_liked(session['user_id'], p['id'])}
     saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
     trending = Post.get_trending_tags(10)
+    pages = (total + per_page - 1) // per_page
     return render_template('feed.html', posts=posts, liked_posts=liked, saved_posts=saved_ids,
-                           tab=tab, tag=tag, trending=trending)
+                           tab=tab, tag=tag, trending=trending,
+                           page=page, pages=pages, per_page=per_page)
 
 
 @app.route('/post/create', methods=['POST'])
 @login_required
+@limiter.limit("10/minute")
 def create_post():
     content = request.form.get('content', '').strip()
     image = request.files.get('image')
@@ -331,6 +376,7 @@ def delete_post(pid):
 
 @app.route('/post/<int:pid>/edit', methods=['GET', 'POST'])
 @login_required
+@limiter.limit("10/minute", methods=['POST'])
 def edit_post(pid):
     post = Post.get(pid)
     if not post:
@@ -398,7 +444,8 @@ def add_comment(pid):
     content = request.form.get('content', '').strip()
     if not content:
         return jsonify({'error': 'Пусто'}), 400
-    c = Comment.create(session['user_id'], pid, content)
+    parent_id = request.form.get('parent_id', type=int)
+    c = Comment.create(session['user_id'], pid, content, parent_id=parent_id)
     Notification.create(post['user_id'], session['user_id'], 'comment', pid)
     owner = User.get(post['user_id'])
     if owner and owner['email_notifs'] and owner['id'] != session['user_id']:
@@ -407,7 +454,7 @@ def add_comment(pid):
     return jsonify({
         'id': c['id'], 'content': c['content'], 'username': c['username'],
         'avatar': c['avatar'], 'avatar_url': _media_for(c['avatar']),
-        'verified': c['verified'],
+        'verified': c['verified'], 'parent_id': c['parent_id'],
         'time': time_ago(c['created_at'])
     })
 
@@ -418,7 +465,7 @@ def get_comments(pid):
     return jsonify([{
         'id': c['id'], 'content': c['content'], 'username': c['username'],
         'avatar': c['avatar'], 'avatar_url': _media_for(c['avatar']),
-        'verified': c['verified'],
+        'verified': c['verified'], 'parent_id': c['parent_id'],
         'time': time_ago(c['created_at'])
     } for c in Comment.get_by_post(pid)])
 
@@ -433,14 +480,97 @@ def profile(username):
         return redirect(url_for('feed'))
     can_view = can_view_profile(session['user_id'], u)
     posts = Post.get_by_user(u['id']) if can_view else []
+    media = Post.get_media_by_user(u['id']) if can_view else []
     liked = {p['id'] for p in posts if Like.is_liked(session['user_id'], p['id'])}
     saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
     return render_template('profile.html', pu=u, posts=posts, liked_posts=liked,
-                           saved_posts=saved_ids, can_view=can_view,
+                           saved_posts=saved_ids, can_view=can_view, media=media,
                            followers_count=Follow.followers_count(u['id']),
                            following_count=Follow.following_count(u['id']),
                            is_following=Follow.is_following(session['user_id'], u['id']),
                            is_own=u['id'] == session['user_id'])
+
+
+# ==================== ГРУППЫ ====================
+
+@app.route('/groups')
+@login_required
+def groups():
+    all_groups = Group.get_all()
+    my_groups = Group.get_user_groups(session['user_id'])
+    return render_template('groups.html', all_groups=all_groups, my_groups=my_groups)
+
+
+@app.route('/group/create', methods=['GET', 'POST'])
+@login_required
+def create_group():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        desc = request.form.get('description', '').strip()
+        priv = 1 if request.form.get('is_private') else 0
+        cover = None
+        f = request.files.get('cover')
+        if f and f.filename:
+            cover = save_file(f, 'group_cover')
+        if not name:
+            flash('Введите название', 'error'); return redirect(request.url)
+        g = Group.create(session['user_id'], name, desc, priv, cover)
+        return redirect(url_for('group_page', slug=g['slug']))
+    return render_template('create_group.html')
+
+
+@app.route('/group/<slug>')
+@login_required
+def group_page(slug):
+    g = Group.get_by_slug(slug)
+    if not g:
+        flash('Группа не найдена', 'error'); return redirect(url_for('groups'))
+    members = Group.get_members(g['id'])
+    posts = Group.get_posts(g['id'])
+    am_member = Group.is_member(g['id'], session['user_id'])
+    am_owner = g['owner_id'] == session['user_id']
+    return render_template('group.html', g=g, members=members, posts=posts,
+                           am_member=am_member, am_owner=am_owner)
+
+
+@app.route('/group/<slug>/join', methods=['POST'])
+@login_required
+def join_group(slug):
+    g = Group.get_by_slug(slug)
+    if not g:
+        return jsonify({'error': 'Не найдено'}), 404
+    joined = Group.toggle_join(g['id'], session['user_id'])
+    return jsonify({'joined': joined})
+
+
+@app.route('/group/<slug>/post', methods=['POST'])
+@login_required
+def group_post(slug):
+    g = Group.get_by_slug(slug)
+    if not g:
+        return jsonify({'error': 'Не найдено'}), 404
+    if not Group.is_member(g['id'], session['user_id']):
+        return jsonify({'error': 'Только для участников'}), 403
+    content = request.form.get('content', '').strip()
+    image = None
+    f = request.files.get('image')
+    if f and f.filename:
+        image = save_file(f, 'post')
+    if not content and not image:
+        return jsonify({'error': 'Пусто'}), 400
+    Post.create(session['user_id'], content, image=image, group_id=g['id'])
+    return jsonify({'ok': True})
+
+
+@app.route('/group/<slug>/members')
+@login_required
+def group_members(slug):
+    g = Group.get_by_slug(slug)
+    if not g:
+        flash('Группа не найдена', 'error'); return redirect(url_for('groups'))
+    members = Group.get_members(g['id'])
+    am_owner = g['owner_id'] == session['user_id']
+    return render_template('group_members.html', g=g, members=members, am_owner=am_owner)
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -534,22 +664,27 @@ def toggle_follow(uid):
 def people():
     q = request.args.get('q', '')
     tab = request.args.get('tab', 'users')
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = 20
     users = []
     posts_results = []
+    pages = 0
     following_ids = {f['followed_id'] for f in Follow.get_following(session['user_id'])}
     liked = set()
     saved_ids = set()
     if q:
         if tab == 'posts':
-            posts_results = Post.search_content(q)
+            posts_results, total = Post.search_content(q, page=page, per_page=per_page)
             liked = {p['id'] for p in posts_results if Like.is_liked(session['user_id'], p['id'])}
             saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
+            pages = (total + per_page - 1) // per_page
         else:
             users = User.search(q)
     else:
         users = [x for x in User.get_all() if x['id'] != session['user_id'] and x['banned'] == 0]
     return render_template('people.html', users=users, following_ids=following_ids, q=q, tab=tab,
-                           posts=posts_results, liked_posts=liked, saved_posts=saved_ids)
+                           posts=posts_results, liked_posts=liked, saved_posts=saved_ids,
+                           page=page, pages=pages)
 
 
 # ==================== ЗАКЛАДКИ ====================
@@ -585,6 +720,7 @@ def chat():
 
 @app.route('/chat/send', methods=['POST'])
 @login_required
+@limiter.limit("30/minute")
 def send_message():
     u = current_user()
     rid = request.form.get('receiver_id', type=int)
@@ -660,6 +796,7 @@ def delete_message(mid):
 
 @app.route('/chat/<int:mid>/react', methods=['POST'])
 @login_required
+@limiter.limit("40/minute")
 def react_message(mid):
     m = Message.get(mid)
     if not m:
@@ -687,6 +824,7 @@ def notifications():
 # ==================== ЖАЛОБЫ ====================
 @app.route('/report', methods=['POST'])
 @login_required
+@limiter.limit("5/minute")
 def report():
     data = request.get_json(silent=True) or {}
     target_type = data.get('target_type', '')
@@ -720,7 +858,7 @@ def admin():
         FROM users u ORDER BY post_count DESC LIMIT 5
     ''').fetchall()
     all_users = User.get_all()
-    all_posts = Post.get_all(limit=200)
+    all_posts, _ = Post.get_all(page=1, per_page=200)
     reports = Report.get_all(status='pending') if tab == 'reports' else None
     return render_template('admin.html', tab=tab, stats=stats, top_users=top_users,
                            all_users=all_users, all_posts=all_posts, reports=reports)
@@ -822,6 +960,14 @@ def handle_stop_typing(data):
 @app.errorhandler(404)
 def not_found(e):
     return render_template('error.html', code=404, message='Страница не найдена'), 404
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    if request.path.startswith('/post/') or request.path.startswith('/chat/') or request.path == '/report':
+        return jsonify({'error': 'Слишком много запросов. Подождите немного.'}), 429
+    flash('Слишком много попыток. Подождите минуту.', 'error')
+    return redirect(request.referrer or url_for('login'))
 
 
 # ==================== ЗАПУСК ====================

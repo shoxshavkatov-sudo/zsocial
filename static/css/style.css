@@ -621,3 +621,51 @@ html.theme-transitioning *::after {
 /* ===== СМЕНА ПАРОЛЯ / АККАУНТ ===== */
 .danger-zone { border: 1px solid var(--danger) !important; border-radius: 12px; }
 .danger-zone h2 { color: var(--danger); }
+
+/* ===== ПАГИНАЦИЯ ===== */
+.pagination { display:flex; align-items:center; justify-content:center; gap:12px; padding:20px 16px 80px; }
+.pagination .page-info { font-size:13px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+
+/* ===== ОНЛАЙН-СТАТУС ===== */
+.online-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e; vertical-align:middle; margin-left:4px; box-shadow:0 0 0 2px var(--bg); animation:onlinePulse 2s infinite; }
+@keyframes onlinePulse { 0%{box-shadow:0 0 0 2px var(--bg),0 0 0 0 rgba(34,197,94,0.5);} 70%{box-shadow:0 0 0 2px var(--bg),0 0 0 6px rgba(34,197,94,0);} 100%{box-shadow:0 0 0 2px var(--bg),0 0 0 0 rgba(34,197,94,0);} }
+.last-seen { font-size:12px; color:var(--text-muted); }
+
+/* ===== МЕДИА-ГАЛЕРЕЯ ПРОФИЛЯ ===== */
+.profile-media { padding:0 16px 16px; }
+.profile-media h3 { font-size:15px; font-weight:700; margin:12px 0 10px; }
+.media-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+.media-grid img { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; cursor:pointer; transition:opacity .15s; }
+.media-grid img:hover { opacity:0.85; }
+.lightbox { position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:500; display:flex; align-items:center; justify-content:center; cursor:zoom-out; }
+.lightbox img { max-width:90vw; max-height:90vh; object-fit:contain; border-radius:8px; }
+
+/* ===== ТРЕДЫ КОММЕНТАРИЕВ ===== */
+.comment.reply { margin-left:38px; }
+.comment.reply .comment img { width:24px; height:24px; }
+.reply-btn { font-size:11px; color:var(--text-muted); cursor:pointer; background:none; border:none; padding:2px 0; margin-top:2px; }
+.reply-btn:hover { color:var(--highlight); }
+.reply-form { display:none; margin:6px 0 10px 38px; gap:6px; align-items:center; }
+.reply-form.visible { display:flex; }
+.reply-form img { width:24px; height:24px; border-radius:50%; }
+.reply-form input { flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:var(--bg); color:var(--text); font-size:12px; outline:none; }
+
+/* ===== ГРУППЫ ===== */
+.groups-grid { display:grid; grid-template-columns:1fr; gap:12px; padding:12px 16px 80px; }
+.group-card { display:flex; gap:12px; padding:14px; background:var(--surface); border:1px solid var(--border); border-radius:12px; cursor:pointer; transition:border-color .15s; }
+.group-card:hover { border-color:var(--highlight); }
+.group-card-cover { width:64px; height:64px; border-radius:10px; object-fit:cover; flex-shrink:0; background:var(--bg-muted); }
+.group-card-info { flex:1; min-width:0; }
+.group-card-info h3 { font-size:15px; font-weight:700; margin-bottom:2px; }
+.group-card-info .g-slug { font-size:12px; color:var(--text-muted); margin-bottom:4px; }
+.group-card-info .g-desc { font-size:13px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.group-card-info .g-meta { font-size:12px; color:var(--text-muted); margin-top:4px; }
+.group-header { position:relative; }
+.group-header .profile-cover { height:120px; }
+.group-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.members-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; padding:0 16px 80px; }
+.member-card { display:flex; align-items:center; gap:8px; padding:8px; border-radius:10px; cursor:pointer; }
+.member-card:hover { background:var(--bg-hover); }
+.member-card img { width:36px; height:36px; border-radius:50%; object-fit:cover; }
+.member-card .m-name { font-size:13px; font-weight:600; }
+.member-card .m-role { font-size:11px; color:var(--text-muted); }

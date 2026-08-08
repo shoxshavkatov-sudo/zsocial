@@ -2,6 +2,43 @@
    ZSocial — клиентская логика
    ============================================ */
 
+// ===== CSRF: обёртка для AJAX + авто-инъекция в формы =====
+(function () {
+    function getCSRF() {
+        const m = document.querySelector('meta[name="csrf-token"]');
+        return m ? m.getAttribute('content') : '';
+    }
+    // Переопределяем fetch: добавляем X-CSRFToken для mutating-запросов
+    const _fetch = window.fetch;
+    window.fetch = function (input, init) {
+        init = init || {};
+        const method = (init.method || 'GET').toUpperCase();
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+            init.headers = init.headers || {};
+            // FormData не принимает set на чужом Headers — работаем с объектом
+            if (init.headers && typeof init.headers.set === 'function') {
+                init.headers.set('X-CSRFToken', getCSRF());
+            } else if (init.headers['X-CSRFToken'] === undefined) {
+                init.headers['X-CSRFToken'] = getCSRF();
+            }
+        }
+        return _fetch(input, init);
+    };
+    // Авто-инъекция скрытого input во все POST-формы
+    document.addEventListener('DOMContentLoaded', function () {
+        const token = getCSRF();
+        if (!token) return;
+        document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function (form) {
+            if (form.querySelector('input[name="csrf_token"]')) return;
+            const inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'csrf_token';
+            inp.value = token;
+            form.appendChild(inp);
+        });
+    });
+})();
+
 // ===== ТЕМА =====
 function getTheme() {
     return localStorage.getItem('zs-theme') || 'light';
@@ -119,9 +156,35 @@ function loadComments(pid) {
     fetch('/post/' + pid + '/comments')
         .then(r => r.json())
         .then(list => {
-            document.getElementById('comments-list-' + pid).innerHTML = list.map(c =>
-                '<div class="comment"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + (c.verified ? ' <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>' : '') + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
-            ).join('');
+            const root = list.filter(c => !c.parent_id);
+            const replies = list.filter(c => c.parent_id);
+            const html = root.map(c => {
+                const kids = replies.filter(r => r.parent_id === c.id);
+                let kidHTML = kids.map(k => commentHTML(k, true)).join('');
+                return commentHTML(c, false) + kidHTML +
+                    '<div class="reply-form" id="reply-form-' + c.id + '"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '"><input placeholder="Ответ..." onkeypress="if(event.key===\'Enter\')submitReply(' + pid + ',' + c.id + ',this)"></div>';
+            }).join('');
+            document.getElementById('comments-list-' + pid).innerHTML = html;
+        });
+}
+function commentHTML(c, isReply) {
+    return '<div class="comment ' + (isReply ? 'reply' : '') + '"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + (c.verified ? ' <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>' : '') + '</div><div class="c-text">' + esc(c.content) + '</div></div>' + (isReply ? '' : '<button class="reply-btn" onclick="showReplyForm(' + c.id + ')">Ответить</button>') + '</div></div>';
+}
+function showReplyForm(cid) {
+    const f = document.getElementById('reply-form-' + cid);
+    if (f) { f.classList.add('visible'); f.querySelector('input').focus(); }
+}
+function submitReply(pid, parentId, inp) {
+    const txt = inp.value.trim();
+    if (!txt) return;
+    const fd = new FormData();
+    fd.append('content', txt);
+    fd.append('parent_id', parentId);
+    fetch('/post/' + pid + '/comment', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(c => {
+            if (c.error) return flashToast(c.error);
+            loadComments(pid);
         });
 }
 function addComment(pid) {
@@ -134,10 +197,7 @@ function addComment(pid) {
         .then(r => r.json())
         .then(c => {
             if (c.error) return flashToast(c.error);
-            const list = document.getElementById('comments-list-' + pid);
-            list.insertAdjacentHTML('beforeend',
-                '<div class="comment"><img src="' + (c.avatar_url || '/static/' + c.avatar) + '" onclick="location.href=\'/profile/' + c.username + '\'"><div class="comment-content"><div class="comment-bubble"><div class="c-author">' + esc(c.username) + '</div><div class="c-text">' + esc(c.content) + '</div></div></div></div><div class="comment-time">' + c.time + '</div>'
-            );
+            loadComments(pid);
             inp.value = '';
         });
 }
@@ -243,6 +303,15 @@ function sharePost(pid) {
 // ===== ХЕШТЕГИ =====
 function searchTag(tag) {
     location.href = '/feed?tag=' + encodeURIComponent(tag);
+}
+
+// ===== LIGHTBOX (медиа-галерея) =====
+function openLightbox(src) {
+    const lb = document.createElement('div');
+    lb.className = 'lightbox';
+    lb.innerHTML = '<img src="' + src + '">';
+    lb.onclick = () => lb.remove();
+    document.body.appendChild(lb);
 }
 
 // ===== ЗАГРУЗКА АВАТАРА/ОБЛОЖКИ (через settings form-submit) =====

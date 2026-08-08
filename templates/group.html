@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ g.name }}{% endblock %}
+{% block content %}
+<div class="profile-header group-header">
+    <img class="profile-cover" src="{{ _media_for(g.cover) }}" alt="">
+    <div class="profile-info" style="padding:12px 16px">
+        <h2>{{ g.name }}
+            {% if g.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
+        </h2>
+        <div style="font-size:13px;color:var(--text-muted)">@{{ g.slug }} · {{ members|length }} участников</div>
+        {% if g.description %}<div style="font-size:14px;margin:4px 0">{{ g.description }}</div>{% endif %}
+        <div class="group-actions" style="margin-top:8px">
+            {% if not am_owner %}
+            <button id="join-btn" class="btn {{ 'btn-secondary' if am_member else 'btn-primary' }}"
+                    onclick="toggleJoin('{{ g.slug }}')">{{ 'Вступить' if not am_member else 'Покинуть' }}</button>
+            {% endif %}
+            <a href="/group/{{ g.slug }}/members" class="btn btn-secondary">Участники</a>
+        </div>
+    </div>
+</div>
+
+{% if am_member %}
+<div style="padding:12px 16px">
+    <div class="compose-box">
+        <textarea id="gpost-input" placeholder="Что нового?" rows="2"></textarea>
+        <div class="compose-actions">
+            <label class="btn btn-sm"><svg class="icon icon-sm"><use href="#i-image"/></svg><input type="file" accept="image/*" hidden onchange="previewGroupImage(this)"></label>
+            <button class="btn btn-primary btn-sm" onclick="submitGroupPost('{{ g.slug }}')">Опубликовать</button>
+        </div>
+        <div id="gpost-preview" class="compose-preview" style="display:none"><img id="gpost-preview-img" src=""></div>
+    </div>
+</div>
+{% endif %}
+
+{% if posts %}
+    {% include "_posts.html" %}
+{% else %}
+<div class="empty-state" style="padding-top:40px">
+    <svg class="icon empty-icon"><use href="#i-message-circle"/></svg>
+    <p>Пока нет постов</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleJoin(slug) {
+    fetch('/group/' + slug + '/join', { method: 'POST' })
+        .then(r => r.json()).then(d => {
+            if (d.joined) {
+                document.getElementById('join-btn').textContent = 'Покинуть';
+                document.getElementById('join-btn').className = 'btn btn-secondary';
+            } else {
+                document.getElementById('join-btn').textContent = 'Вступить';
+                document.getElementById('join-btn').className = 'btn btn-primary';
+            }
+            location.reload();
+        });
+}
+let groupImage = null;
+function previewGroupImage(inp) {
+    if (!inp.files[0]) return;
+    groupImage = inp.files[0];
+    const r = new FileReader();
+    r.onload = e => {
+        const p = document.getElementById('gpost-preview');
+        document.getElementById('gpost-preview-img').src = e.target.result;
+        p.style.display = 'block';
+    };
+    r.readAsDataURL(groupImage);
+}
+function submitGroupPost(slug) {
+    const content = document.getElementById('gpost-input').value.trim();
+    if (!content && !groupImage) return flashToast('Пусто');
+    const fd = new FormData();
+    fd.append('content', content);
+    if (groupImage) fd.append('image', groupImage);
+    fetch('/group/' + slug + '/post', { method: 'POST', body: fd })
+        .then(r => r.json()).then(d => {
+            if (d.error) return flashToast(d.error);
+            location.reload();
+        });
+}
+</script>
+{% endblock %}

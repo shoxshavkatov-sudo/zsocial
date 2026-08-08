@@ -147,6 +147,29 @@ def init_db():
         FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        slug TEXT UNIQUE NOT NULL,
+        description TEXT DEFAULT '',
+        cover TEXT DEFAULT 'img/default_cover.svg',
+        is_private INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS group_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        role TEXT DEFAULT 'member',
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(group_id, user_id),
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     ''')
 
     # Настройки по умолчанию
@@ -188,6 +211,7 @@ def migrate_db():
         'banned': 'INTEGER DEFAULT 0',
         'email_notifs': 'INTEGER DEFAULT 1',
         'token_version': 'INTEGER DEFAULT 0',
+        'last_seen': 'TIMESTAMP',
     }
     for col, typedef in user_new.items():
         if col not in ucols:
@@ -198,10 +222,15 @@ def migrate_db():
         'parent_id': 'INTEGER REFERENCES posts(id) ON DELETE CASCADE',
         'quote': 'TEXT DEFAULT ""',
         'updated_at': 'TIMESTAMP',
+        'group_id': 'INTEGER REFERENCES groups(id) ON DELETE CASCADE',
     }
     for col, typedef in post_new.items():
         if col not in pcols:
             conn.execute(f'ALTER TABLE posts ADD COLUMN {col} {typedef}')
+    # Колонка comments.parent_id (треды/ответы)
+    ccols = [r[1] for r in conn.execute('PRAGMA table_info(comments)').fetchall()]
+    if 'parent_id' not in ccols:
+        conn.execute('ALTER TABLE comments ADD COLUMN parent_id INTEGER')
     # bookmarks таблица (если старая БД)
     tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
     if 'bookmarks' not in tables:
@@ -238,11 +267,65 @@ def migrate_db():
             FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )''')
+    if 'groups' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            description TEXT DEFAULT '',
+            cover TEXT DEFAULT 'img/default_cover.svg',
+            is_private INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+    if 'group_members' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS group_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'member',
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, user_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+
+    # === Индексы для производительности (IF NOT EXISTS — идемпотентно) ===
+    conn.executescript('''
+        CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_posts_parent_id ON posts(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at);
+        CREATE INDEX IF NOT EXISTS idx_likes_post_id ON likes(post_id);
+        CREATE INDEX IF NOT EXISTS idx_likes_user_id ON likes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+        CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
+        CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON bookmarks(user_id);
+        CREATE INDEX IF NOT EXISTS idx_follows_followed ON follows(followed_id);
+        CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_recv_read ON messages(receiver_id, is_read);
+        CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+        CREATE INDEX IF NOT EXISTS idx_notifs_user_read ON notifications(user_id, is_read);
+        CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions(message_id);
+    ''')
+
     conn.commit()
     conn.close()
 
 
 # ==================== УТИЛИТЫ ====================
+def is_online(profile_user, threshold_seconds=120):
+    """True если пользователь был активен за последние ~2 минуты."""
+    if not profile_user or not profile_user['last_seen']:
+        return False
+    try:
+        from datetime import datetime
+        dt = datetime.strptime(str(profile_user['last_seen'])[:19], '%Y-%m-%d %H:%M:%S')
+        return (datetime.now() - dt).total_seconds() < threshold_seconds
+    except (ValueError, TypeError):
+        return False
+
+
 def can_view_profile(viewer_id, profile_user):
     """Может ли зритель видеть приватный профиль."""
     if not profile_user:
@@ -364,11 +447,11 @@ class User:
 
 class Post:
     @staticmethod
-    def create(user_id, content, image=None):
+    def create(user_id, content, image=None, group_id=None):
         db = get_db()
         db.execute(
-            'INSERT INTO posts (user_id, content, image) VALUES (?, ?, ?)',
-            (user_id, content, image)
+            'INSERT INTO posts (user_id, content, image, group_id) VALUES (?, ?, ?, ?)',
+            (user_id, content, image, group_id)
         )
         db.commit()
         return db.execute('SELECT * FROM posts WHERE id = last_insert_rowid()').fetchone()
@@ -390,22 +473,44 @@ class Post:
         '''
 
     @staticmethod
-    def get_all(limit=100, tag=None):
+    def get_all(page=1, per_page=20, tag=None, limit=None):
+        """Пагинированная лента. Возвращает (rows, total_count).
+        limit — верхний потолок total_count (для админки), иначе считаем все."""
         db = get_db()
+        where = ''
+        params = ()
         if tag:
-            return db.execute(Post._feed_where('AND LOWER(p.content) LIKE ?'), (f'%#{tag}%',)).fetchall()[:limit]
-        return db.execute(Post._feed_where()).fetchall()[:limit]
+            where = 'WHERE LOWER(p.content) LIKE ?'
+            params = (f'%#{tag}%',)
+        total = db.execute(
+            'SELECT COUNT(*) c FROM posts p JOIN users u ON p.user_id=u.id WHERE u.banned=0 '
+            + ('AND LOWER(p.content) LIKE ?' if tag else ''),
+            params
+        ).fetchone()['c']
+        rows = db.execute(
+            Post._feed_where(('AND LOWER(p.content) LIKE ?' if tag else '')) + ' LIMIT ? OFFSET ?',
+            (*params, per_page, (page - 1) * per_page)
+        ).fetchall()
+        return rows, total
 
     @staticmethod
-    def get_following_feed(user_id, limit=100, tag=None):
+    def get_following_feed(user_id, page=1, per_page=20, tag=None):
         db = get_db()
         extra = 'AND (p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?) OR p.user_id = ?)'
+        cnt_params = [user_id, user_id]
+        feed_params = [user_id, user_id]
         if tag:
             extra += ' AND LOWER(p.content) LIKE ?'
-            params = (user_id, user_id, f'%#{tag}%')
-        else:
-            params = (user_id, user_id)
-        return db.execute(Post._feed_where(extra), params).fetchall()[:limit]
+            cnt_params.append(f'%#{tag}%')
+            feed_params.append(f'%#{tag}%')
+        total = db.execute(
+            'SELECT COUNT(*) c FROM posts p JOIN users u ON p.user_id=u.id WHERE u.banned=0 '
+            + extra, tuple(cnt_params)
+        ).fetchone()['c']
+        feed_params.append(per_page)
+        feed_params.append((page - 1) * per_page)
+        rows = db.execute(Post._feed_where(extra + ' LIMIT ? OFFSET ?'), tuple(feed_params)).fetchall()
+        return rows, total
 
     @staticmethod
     def get_by_user(user_id):
@@ -433,9 +538,27 @@ class Post:
         return None
 
     @staticmethod
-    def search_content(q, limit=50):
+    def search_content(q, page=1, per_page=20):
         db = get_db()
-        return db.execute(Post._feed_where('AND LOWER(p.content) LIKE ?'), (f'%{q.lower()}%',)).fetchall()[:limit]
+        like = f'%{q.lower()}%'
+        total = db.execute(
+            'SELECT COUNT(*) c FROM posts p JOIN users u ON p.user_id=u.id '
+            'WHERE u.banned=0 AND LOWER(p.content) LIKE ?', (like,)
+        ).fetchone()['c']
+        rows = db.execute(
+            Post._feed_where('AND LOWER(p.content) LIKE ?') + ' LIMIT ? OFFSET ?',
+            (like, per_page, (page - 1) * per_page)
+        ).fetchall()
+        return rows, total
+
+    @staticmethod
+    def get_media_by_user(user_id):
+        """Все посты пользователя с изображениями — для медиа-галереи профиля."""
+        db = get_db()
+        return db.execute(
+            Post._feed_where('AND p.user_id = ? AND p.image IS NOT NULL'),
+            (user_id,)
+        ).fetchall()
 
     @staticmethod
     def repost(user_id, parent_id, quote=''):
@@ -491,9 +614,10 @@ class Like:
 
 class Comment:
     @staticmethod
-    def create(uid, pid, content):
+    def create(uid, pid, content, parent_id=None):
         db = get_db()
-        db.execute('INSERT INTO comments (user_id, post_id, content) VALUES (?, ?, ?)', (uid, pid, content))
+        db.execute('INSERT INTO comments (user_id, post_id, content, parent_id) VALUES (?, ?, ?, ?)',
+                   (uid, pid, content, parent_id))
         db.commit()
         c = db.execute('SELECT * FROM comments WHERE id = last_insert_rowid()').fetchone()
         u = User.get(uid)
@@ -740,22 +864,116 @@ class Report:
         db.commit()
 
 
-class SiteSettings:
+class Group:
     @staticmethod
-    def get(key, default=None):
+    def _slugify(name):
+        import re
+        import unicodedata
+        s = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
+        s = re.sub(r'[^\w\s-]', '', s).strip().lower()
+        return re.sub(r'[-\s]+', '-', s) or 'group'
+
+    @staticmethod
+    def create(owner_id, name, description='', is_private=0, cover=None):
         db = get_db()
-        r = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
-        return r['value'] if r else default
+        base = Group._slugify(name)
+        slug = base
+        i = 2
+        while db.execute('SELECT 1 FROM groups WHERE slug=?', (slug,)).fetchone():
+            slug = f'{base}-{i}'; i += 1
+        db.execute('INSERT INTO groups (owner_id, name, slug, description, is_private, cover) VALUES (?,?,?,?,?,?)',
+                   (owner_id, name, slug, description, is_private, cover or 'img/default_cover.svg'))
+        gid = db.execute('SELECT id FROM groups WHERE slug=?', (slug,)).fetchone()['id']
+        db.execute('INSERT INTO group_members (group_id, user_id, role) VALUES (?,?,?)', (gid, owner_id, 'owner'))
+        db.commit()
+        return Group.get_by_slug(slug)
+
+    @staticmethod
+    def get(gid):
+        db = get_db()
+        return db.execute('SELECT * FROM groups WHERE id = ?', (gid,)).fetchone()
+
+    @staticmethod
+    def get_by_slug(slug):
+        db = get_db()
+        return db.execute('SELECT * FROM groups WHERE slug = ?', (slug,)).fetchone()
 
     @staticmethod
     def get_all():
         db = get_db()
-        rows = db.execute('SELECT * FROM settings').fetchall()
-        return {r['key']: r['value'] for r in rows}
+        return db.execute('''
+            SELECT g.*, u.username as owner_name,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count
+            FROM groups g JOIN users u ON g.owner_id=u.id
+            ORDER BY g.created_at DESC
+        ''').fetchall()
 
     @staticmethod
-    def set(key, value):
+    def get_user_groups(uid):
+        db = get_db()
+        return db.execute('''
+            SELECT g.*, (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count
+            FROM group_members gm JOIN groups g ON gm.group_id=g.id
+            WHERE gm.user_id=? ORDER BY gm.joined_at DESC
+        ''', (uid,)).fetchall()
+
+    @staticmethod
+    def is_member(gid, uid):
+        db = get_db()
+        return db.execute('SELECT 1 FROM group_members WHERE group_id=? AND user_id=?', (gid, uid)).fetchone() is not None
+
+    @staticmethod
+    def toggle_join(gid, uid):
+        db = get_db()
+        if Group.is_member(gid, uid):
+            db.execute('DELETE FROM group_members WHERE group_id=? AND user_id=? AND role!="owner"', (gid, uid))
+            db.commit(); return False
+        db.execute('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)', (gid, uid))
+        db.commit(); return True
+
+    @staticmethod
+    def get_members(gid):
+        db = get_db()
+        return db.execute('''
+            SELECT u.username, u.display_name, u.avatar, u.verified, gm.role
+            FROM group_members gm JOIN users u ON gm.user_id=u.id
+            WHERE gm.group_id=? ORDER BY gm.joined_at ASC
+        ''', (gid,)).fetchall()
+
+    @staticmethod
+    def get_posts(gid):
+        db = get_db()
+        return db.execute(Post._feed_where('AND p.group_id = ?'), (gid,)).fetchall()
+
+
+class SiteSettings:
+    # In-memory кэш, чтобы не дёргать БД на каждом HTTP-запросе.
+    _cache = None
+
+    @classmethod
+    def _load_cache(cls):
+        db = get_db()
+        rows = db.execute('SELECT * FROM settings').fetchall()
+        cls._cache = {r['key']: r['value'] for r in rows}
+        return cls._cache
+
+    @classmethod
+    def get(cls, key, default=None):
+        if cls._cache is None:
+            cls._load_cache()
+        return cls._cache.get(key, default)
+
+    @classmethod
+    def get_all(cls):
+        if cls._cache is None:
+            cls._load_cache()
+        return dict(cls._cache)
+
+    @classmethod
+    def set(cls, key, value):
         db = get_db()
         db.execute('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?',
                    (key, value, value))
         db.commit()
+        if cls._cache is not None:
+            cls._cache[key] = value

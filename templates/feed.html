@@ -61,5 +61,17 @@
             </div>
         {% endif %}
     </div>
+
+    {% if pages and pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a class="btn btn-outline btn-sm" href="{{ url_for('feed', page=page-1, tab=tab, tag=tag) }}">← Назад</a>
+        {% endif %}
+        <span class="page-info">{{ page }} / {{ pages }}</span>
+        {% if page < pages %}
+        <a class="btn btn-outline btn-sm" href="{{ url_for('feed', page=page+1, tab=tab, tag=tag) }}">Вперёд →</a>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

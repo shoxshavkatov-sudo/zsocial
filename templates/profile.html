@@ -42,7 +42,14 @@
             {% if pu.role == 'admin' %}<span class="badge badge-admin">ADMIN</span>{% endif %}
             {% if pu.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
         </div>
-        <div class="profile-handle">@{{ pu.username }}</div>
+        <div class="profile-handle">
+            @{{ pu.username }}
+            {% if is_online(pu) %}
+            <span class="online-dot" title="В сети"></span>
+            {% else %}
+            <span class="last-seen" title="Был в сети">{% if pu.last_seen %} · был в сети {{ pu.last_seen | time_ago }}{% endif %}</span>
+            {% endif %}
+        </div>
 
         {% if can_view %}
             {% if pu.bio %}<div class="profile-bio">{{ pu.bio }}</div>{% endif %}
@@ -56,6 +63,18 @@
                 <div class="profile-stat"><strong id="followers-count">{{ followers_count }}</strong><span>подписчиков</span></div>
                 <div class="profile-stat"><strong>{{ posts|length }}</strong><span>публикаций</span></div>
             </div>
+
+            {% if media %}
+            <div class="profile-media">
+                <h3>Медиа</h3>
+                <div class="media-grid">
+                    {% for m in media[:9] %}
+                    <img src="{{ media_url(m.image) }}" onclick="openLightbox('{{ media_url(m.image) }}')" alt="">
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             {% if posts %}
                 {% include '_posts.html' %}
             {% else %}

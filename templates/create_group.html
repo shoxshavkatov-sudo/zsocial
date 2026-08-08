@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Создать группу{% endblock %}
+{% block content %}
+<div class="container" style="padding:16px 16px 80px">
+    <h2 style="margin:0 0 16px">Создать группу</h2>
+    <form method="POST" enctype="multipart/form-data" style="max-width:500px">
+        <div class="form-group">
+            <label>Название</label>
+            <input type="text" name="name" required maxlength="60" placeholder="Название группы">
+        </div>
+        <div class="form-group">
+            <label>Описание</label>
+            <textarea name="description" rows="3" maxlength="300" placeholder="О чём ваша группа"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Обложка</label>
+            <input type="file" name="cover" accept="image/*">
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_private" value="1"> Приватная группа
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Создать</button>
+    </form>
+</div>
+{% endblock %}
