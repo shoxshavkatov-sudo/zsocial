@@ -669,3 +669,37 @@ html.theme-transitioning *::after {
 .member-card img { width:36px; height:36px; border-radius:50%; object-fit:cover; }
 .member-card .m-name { font-size:13px; font-weight:600; }
 .member-card .m-role { font-size:11px; color:var(--text-muted); }
+
+/* ===== МОДАЛЬНОЕ ОКНО (кнопка +) ===== */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:400; display:none; align-items:flex-end; justify-content:center; padding:0; backdrop-filter:blur(4px); }
+.modal-overlay.visible { display:flex; }
+.modal-card { background:var(--surface); border:1px solid var(--border); border-radius:16px 16px 0 0; width:100%; max-width:560px; max-height:90vh; display:flex; flex-direction:column; animation:slideUp .25s ease; }
+@keyframes slideUp { from{transform:translateY(100%);} to{transform:translateY(0);} }
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+.modal-header h3 { font-size:16px; font-weight:700; margin:0; }
+.modal-close { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px; border-radius:8px; }
+.modal-close:hover { background:var(--bg-hover); color:var(--text); }
+.modal-body { padding:16px 20px; overflow-y:auto; flex:1; }
+.modal-body textarea { width:100%; border:none; background:transparent; color:var(--text); font-size:16px; resize:none; outline:none; min-height:80px; }
+.modal-footer { display:flex; align-items:center; gap:12px; padding:12px 20px; border-top:1px solid var(--border); }
+.modal-footer .char-count { margin-left:auto; font-size:12px; color:var(--text-muted); }
+.modal-footer .btn-primary { margin-left:8px; }
+.remove-img-btn { position:absolute; top:4px; right:4px; background:rgba(0,0,0,0.7); color:#fff; border:none; border-radius:50%; width:24px; height:24px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+#compose-modal-preview { position:relative; margin-top:8px; }
+#compose-modal-preview img { width:100%; max-height:240px; object-fit:cover; border-radius:12px; }
+@media (min-width:600px){ .modal-overlay{align-items:center;} .modal-card{border-radius:16px;} }
+
+/* ===== ОПРОСЫ ===== */
+.poll-box { margin:12px 0; padding:12px; background:var(--bg-muted); border-radius:12px; }
+.poll-question { font-weight:700; font-size:14px; margin-bottom:10px; }
+.poll-option { position:relative; padding:10px 12px; border:2px solid var(--border); border-radius:999px; margin-bottom:6px; cursor:pointer; overflow:hidden; transition:border-color .15s; min-height:40px; display:flex; align-items:center; }
+.poll-option:hover { border-color:var(--highlight); }
+.poll-option.voted { cursor:default; }
+.poll-option.voted:hover { border-color:var(--border); }
+.poll-bar { position:absolute; left:0; top:0; bottom:0; background:var(--highlight); opacity:0.15; transition:width .3s ease; border-radius:999px; }
+.poll-text { position:relative; z-index:1; font-size:13px; font-weight:500; }
+.poll-percent { position:relative; z-index:1; margin-left:auto; font-size:13px; font-weight:700; color:var(--highlight); }
+.poll-meta { font-size:12px; color:var(--text-muted); margin-top:8px; }
+
+/* Кнопка опроса активна */
+#poll-toggle-btn.active { color:var(--highlight); background:var(--bg-hover); }

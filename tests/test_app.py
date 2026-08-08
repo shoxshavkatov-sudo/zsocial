@@ -131,6 +131,68 @@ class TestInteractions:
         assert r.get_json()['saved'] is True
 
 
+# ==================== ОПРОСЫ ====================
+
+class TestPolls:
+    def test_create_post_with_poll(self, app):
+        client = auth_client(app, username='pollcreator')
+        r = client.post('/post/create', data={
+            'content': 'Какой язык лучше?',
+            'poll_question': 'Любимый язык?',
+            'poll_options': 'Python\nJavaScript\nRust',
+        })
+        assert r.status_code == 302
+        with app.app_context():
+            from models import Poll, get_db
+            db = get_db()
+            pid = db.execute('SELECT MAX(id) id FROM posts').fetchone()['id']
+            poll = Poll.get_by_post(pid)
+            assert poll is not None
+            assert len(poll['options']) == 3
+
+    def test_vote_in_poll(self, app):
+        client = auth_client(app, username='pollvoter')
+        client.post('/post/create', data={
+            'content': 'Голосование!',
+            'poll_question': 'Чай или кофе?',
+            'poll_options': 'Чай\nКофе',
+        })
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            opt_id = db.execute('SELECT id FROM poll_options LIMIT 1').fetchone()['id']
+        r = client.post(f'/poll/{opt_id}/vote')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data['ok'] is True
+        assert data['poll']['total_votes'] >= 1
+
+    def test_poll_vote_changes(self, app):
+        """Пользователь может переголосовать (меняет выбор)."""
+        client = auth_client(app, username='pollchanger')
+        client.post('/post/create', data={
+            'content': 'Переголосование',
+            'poll_question': 'Q?',
+            'poll_options': 'A\nB',
+        })
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            opt_a = db.execute('SELECT id FROM poll_options ORDER BY id LIMIT 1').fetchone()['id']
+            opt_b = db.execute('SELECT id FROM poll_options ORDER BY id DESC LIMIT 1').fetchone()['id']
+        # Голосуем за A
+        client.post(f'/poll/{opt_a}/vote')
+        # Переголосовываем за B
+        client.post(f'/poll/{opt_b}/vote')
+        with app.app_context():
+            from models import Poll, get_db
+            db = get_db()
+            pid = db.execute('SELECT MAX(id) id FROM posts').fetchone()['id']
+            poll = Poll.get_by_post(pid)
+            # Должен быть только 1 голос (за B)
+            assert poll['total_votes'] == 1
+
+
 # ==================== СООБЩЕНИЯ ====================
 
 class TestMessaging:

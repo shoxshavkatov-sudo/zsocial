@@ -19,7 +19,7 @@ from config import Config
 from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     is_online,
-    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, SiteSettings
+    User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings
 )
 import mailer
 
@@ -242,13 +242,29 @@ def inject_globals():
         """Строит правильный URL для медиа по пути из БД (см. _media_for)."""
         return _media_for(path)
 
+    def poll_for(post_id):
+        """Возвращает опрос для поста или None (для шаблона)."""
+        return Poll.get_by_post(post_id)
+
+    def has_voted(post_id):
+        """Голосовал ли текущий пользователь в опросе поста."""
+        if not u:
+            return False
+        return Poll.has_voted(post_id, u['id'])
+
+    def view_count(post_id):
+        return PostView.count(post_id)
+
     return dict(cu=u, unread_notifs=notifs, unread_msgs=msgs,
                 site_name=site.get('site_name', 'ZSocial'),
                 site_desc=site.get('site_desc', ''),
                 site=site,
                 v=APP_VERSION,
                 media_url=media_url,
-                is_online=is_online)
+                is_online=is_online,
+                poll_for=poll_for,
+                has_voted=has_voted,
+                view_count=view_count)
 
 
 @app.context_processor
@@ -354,11 +370,19 @@ def feed():
 def create_post():
     content = request.form.get('content', '').strip()
     image = request.files.get('image')
-    if not content and (not image or not image.filename):
+    # Опрос (необязательно)
+    poll_question = request.form.get('poll_question', '').strip()
+    poll_options_raw = request.form.get('poll_options', '').strip()
+    has_poll = poll_question and poll_options_raw
+    if not content and (not image or not image.filename) and not has_poll:
         flash('Пост пуст', 'error')
         return redirect(url_for('feed'))
     img_path = save_file(image, 'post') if image else None
-    Post.create(session['user_id'], content, img_path)
+    post = Post.create(session['user_id'], content, img_path)
+    if has_poll:
+        opts = [o.strip() for o in poll_options_raw.split('\n') if o.strip()]
+        if len(opts) >= 2:
+            Poll.create(post['id'], poll_question, opts)
     flash('Опубликовано', 'success')
     return redirect(url_for('feed'))
 
@@ -424,6 +448,19 @@ def toggle_like(pid):
             actor = current_user()
             mailer.notify_like(owner['email'], actor['display_name'] or actor['username'], (post['content'] or '')[:80])
     return jsonify({'liked': liked, 'count': Like.count(pid)})
+
+
+@app.route('/poll/<int:option_id>/vote', methods=['POST'])
+@login_required
+def poll_vote(option_id):
+    ok = Poll.vote(option_id, session['user_id'])
+    if not ok:
+        return jsonify({'error': 'Вариант не найден'}), 404
+    # Найти пост и вернуть обновлённый опрос
+    opt = get_db().execute('SELECT p.post_id FROM poll_options o JOIN polls p ON o.poll_id=p.id WHERE o.id=?',
+                           (option_id,)).fetchone()
+    poll = Poll.get_by_post(opt['post_id']) if opt else None
+    return jsonify({'ok': True, 'poll': poll})
 
 
 @app.route('/post/<int:pid>/bookmark', methods=['POST'])

@@ -32,6 +32,7 @@
 <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></symbol>
 <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
 <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="i-bar-chart" viewBox="0 0 24 24"><path d="M12 20V10M18 20V4M6 20v-6"/></symbol>
 <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
@@ -80,7 +81,7 @@
     <button class="bottombar-item {% if request.endpoint == 'people' %}active{% endif %}" onclick="location.href='{{ url_for('people') }}'" title="Поиск">
         <svg class="icon"><use href="#i-search"/></svg>
     </button>
-    <button class="bottombar-item compose-btn" onclick="location.href='{{ url_for('feed') }}'" title="Новый пост">
+    <button class="bottombar-item compose-btn" onclick="openComposeModal()" title="Новый пост">
         <svg class="icon"><use href="#i-plus"/></svg>
     </button>
     <button class="bottombar-item {% if request.endpoint == 'chat' %}active{% endif %}" onclick="location.href='{{ url_for('chat') }}'" title="Сообщения">
@@ -110,6 +111,38 @@
     </button>
 </nav>
 <script>document.body.classList.add('has-bottombar');</script>
+
+{# === Модальное окно создания поста (кнопка +) === #}
+<div class="modal-overlay" id="compose-modal" onclick="if(event.target===this)closeComposeModal()">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3>Новая публикация</h3>
+            <button class="modal-close" onclick="closeComposeModal()"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="modal-body">
+            <textarea id="compose-modal-text" placeholder="Что нового, {{ cu.username }}?" rows="4" maxlength="500" oninput="document.getElementById('compose-modal-count').textContent=this.value.length+'/500'"></textarea>
+            <div class="compose-preview" id="compose-modal-preview" style="display:none">
+                <img id="compose-modal-preview-img" src="">
+                <button class="remove-img-btn" onclick="removeComposeImage()"><svg class="icon icon-sm"><use href="#i-x"/></svg></button>
+            </div>
+            <div id="compose-poll-box" style="display:none;margin-top:12px">
+                <input type="text" id="compose-poll-question" placeholder="Вопрос опроса" class="input" style="margin-bottom:8px">
+                <textarea id="compose-poll-options" class="input" rows="4" placeholder="Варианты (по одному на строку, минимум 2)"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <label class="btn btn-sm" title="Прикрепить фото">
+                <svg class="icon icon-sm"><use href="#i-image"/></svg>
+                <input type="file" accept="image/*" hidden onchange="previewComposeImage(this)">
+            </label>
+            <button class="btn btn-sm" id="poll-toggle-btn" onclick="togglePollInModal()" title="Опрос">
+                <svg class="icon icon-sm"><use href="#i-bar-chart"/></svg>
+            </button>
+            <span id="compose-modal-count" class="char-count">0/500</span>
+            <button class="btn btn-primary" onclick="submitComposeModal()">Опубликовать</button>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>

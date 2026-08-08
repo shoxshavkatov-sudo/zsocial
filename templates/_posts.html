@@ -6,7 +6,7 @@
     <div class="repost-header">
         <svg class="icon icon-sm" style="color:var(--text-muted)"><use href="#i-share"/></svg>
         <a href="{{ url_for('profile', username=post.username) }}">{{ post.display_name or post.username }}</a>
-        {% if post.quote %}<span class="text-muted">: {{ post.quote[:100] }}</span>{ endif %}
+        {% if post.quote %}<span class="text-muted">: {{ post.quote[:100] }}</span>{% endif %}
     </div>
     {% if post.image %}
     <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" onclick="window.open('{{ media_url(post.image) }}')"></div>
@@ -23,7 +23,6 @@
             </div>
         </div>
     </div>
-    {% endif %}
     {# === Обычный пост === #}
     {% else %}
     <div class="post-head">
@@ -45,9 +44,25 @@
     <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" onclick="window.open('{{ media_url(post.image) }}')"></div>
     {% endif %}
 
-    {% if post.like_count > 0 or post.comment_count > 0 %}
+    {# === Опрос === #}
+    {% set poll = poll_for(post.id) %}
+    {% if poll %}
+    <div class="poll-box" id="poll-{{ post.id }}">
+        <div class="poll-question">{{ poll.question }}</div>
+        {% for opt in poll.options %}
+        <div class="poll-option {{ 'voted' if has_voted(post.id) else '' }}" onclick="{{ 'votePoll(' ~ post.id ~ ',' ~ opt.id ~ ')' if not has_voted(post.id) else '' }}">
+            <div class="poll-bar" style="width:{{ opt.percent if has_voted(post.id) else 0 }}%"></div>
+            <span class="poll-text">{{ opt.text }}</span>
+            {% if has_voted(post.id) %}<span class="poll-percent">{{ opt.percent }}%</span>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="poll-meta">{{ poll.total_votes }} голосов</div>
+    </div>
+    {% endif %}
+
+    {% if post.like_count > 0 or post.comment_count > 0 or view_count(post.id) > 0 %}
     <div class="post-stats">
-        <span class="text-sm text-muted">{% if post.like_count > 0 %}{{ post.like_count }} отметок{% endif %}{% if post.like_count > 0 and post.comment_count > 0 %} · {% endif %}{% if post.comment_count > 0 %}{{ post.comment_count }} комментариев{% endif %}</span>
+        <span class="text-sm text-muted">{% if post.like_count > 0 %}{{ post.like_count }} отметок{% endif %}{% if post.like_count > 0 and post.comment_count > 0 %} · {% endif %}{% if post.comment_count > 0 %}{{ post.comment_count }} комментариев{% endif %}{% if view_count(post.id) > 0 %} · 👁 {{ view_count(post.id) }}{% endif %}</span>
     </div>
     {% endif %}
     <div class="post-actions">

@@ -170,6 +170,40 @@ def init_db():
         FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS polls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        question TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_options (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        poll_id INTEGER NOT NULL,
+        option_text TEXT NOT NULL,
+        FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        option_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(option_id, user_id),
+        FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS post_views (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        user_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(post_id, user_id),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+    );
     ''')
 
     # Настройки по умолчанию
@@ -290,6 +324,41 @@ def migrate_db():
             FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )''')
+    # Новые таблицы (опросы, просмотры)
+    for tname, tsql in [
+        ('polls', '''CREATE TABLE IF NOT EXISTS polls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            question TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+        )'''),
+        ('poll_options', '''CREATE TABLE IF NOT EXISTS poll_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poll_id INTEGER NOT NULL,
+            option_text TEXT NOT NULL,
+            FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+        )'''),
+        ('poll_votes', '''CREATE TABLE IF NOT EXISTS poll_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            option_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(option_id, user_id),
+            FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )'''),
+        ('post_views', '''CREATE TABLE IF NOT EXISTS post_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(post_id, user_id),
+            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+        )'''),
+    ]:
+        if tname not in tables:
+            conn.execute(tsql)
 
     # === Индексы для производительности (IF NOT EXISTS — идемпотентно) ===
     conn.executescript('''
@@ -862,6 +931,83 @@ class Report:
         db = get_db()
         db.execute('UPDATE reports SET status = ? WHERE id = ?', (status, rid))
         db.commit()
+
+
+class Poll:
+    @staticmethod
+    def create(post_id, question, options):
+        """Создаёт опрос: question + список вариантов."""
+        db = get_db()
+        db.execute('INSERT INTO polls (post_id, question) VALUES (?, ?)', (post_id, question))
+        pid = db.execute('SELECT id FROM polls WHERE post_id = ?', (post_id,)).fetchone()['id']
+        for opt in options:
+            opt = opt.strip()
+            if opt:
+                db.execute('INSERT INTO poll_options (poll_id, option_text) VALUES (?, ?)', (pid, opt))
+        db.commit()
+        return pid
+
+    @staticmethod
+    def get_by_post(post_id):
+        """Возвращает опрос поста или None: {id, question, options: [{id, text, votes, voted}]}"""
+        db = get_db()
+        poll = db.execute('SELECT * FROM polls WHERE post_id = ?', (post_id,)).fetchone()
+        if not poll:
+            return None
+        opts = db.execute('SELECT * FROM poll_options WHERE poll_id = ?', (poll['id'],)).fetchall()
+        total_votes = 0
+        result_opts = []
+        for o in opts:
+            count = db.execute('SELECT COUNT(*) c FROM poll_votes WHERE option_id = ?', (o['id'],)).fetchone()['c']
+            total_votes += count
+            result_opts.append({'id': o['id'], 'text': o['option_text'], 'votes': count})
+        # Проценты
+        for o in result_opts:
+            o['percent'] = round(o['votes'] / total_votes * 100) if total_votes else 0
+        return {'id': poll['id'], 'question': poll['question'],
+                'options': result_opts, 'total_votes': total_votes}
+
+    @staticmethod
+    def vote(option_id, user_id):
+        """Голосует за вариант (один голос на пользователя в рамках опроса)."""
+        db = get_db()
+        opt = db.execute('SELECT * FROM poll_options WHERE id = ?', (option_id,)).fetchone()
+        if not opt:
+            return False
+        poll_id = opt['poll_id']
+        # Удаляем предыдущий голос пользователя в этом опросе
+        db.execute('''DELETE FROM poll_votes WHERE user_id = ? AND option_id IN
+                      (SELECT id FROM poll_options WHERE poll_id = ?)''', (user_id, poll_id))
+        db.execute('INSERT INTO poll_votes (option_id, user_id) VALUES (?, ?)', (option_id, user_id))
+        db.commit()
+        return True
+
+    @staticmethod
+    def has_voted(post_id, user_id):
+        """Проверяет, голосовал ли пользователь в опросе поста."""
+        db = get_db()
+        return db.execute('''SELECT 1 FROM poll_votes v
+            JOIN poll_options o ON v.option_id = o.id
+            JOIN polls p ON o.poll_id = p.id
+            WHERE p.post_id = ? AND v.user_id = ?''', (post_id, user_id)).fetchone() is not None
+
+
+class PostView:
+    @staticmethod
+    def record(post_id, user_id=None):
+        """Фиксирует просмотр поста (один раз на пользователя)."""
+        db = get_db()
+        try:
+            db.execute('INSERT OR IGNORE INTO post_views (post_id, user_id) VALUES (?, ?)',
+                       (post_id, user_id))
+            db.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def count(post_id):
+        db = get_db()
+        return db.execute('SELECT COUNT(*) c FROM post_views WHERE post_id = ?', (post_id,)).fetchone()['c']
 
 
 class Group:

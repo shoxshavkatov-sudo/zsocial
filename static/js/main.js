@@ -152,6 +152,23 @@ function toggleComments(pid) {
         sec.classList.add('hidden');
     }
 }
+
+// ===== ОПРОСЫ =====
+function votePoll(postId, optionId) {
+    fetch('/poll/' + optionId + '/vote', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) return flashToast(d.error);
+            if (d.poll) {
+                const box = document.getElementById('poll-' + postId);
+                if (!box) return;
+                const opts = d.poll.options;
+                box.innerHTML = '<div class="poll-question">' + esc(d.poll.question) + '</div>' +
+                    opts.map(o => '<div class="poll-option voted"><div class="poll-bar" style="width:' + o.percent + '%"></div><span class="poll-text">' + esc(o.text) + '</span><span class="poll-percent">' + o.percent + '%</span></div>').join('') +
+                    '<div class="poll-meta">' + d.poll.total_votes + ' голосов</div>';
+            }
+        });
+}
 function loadComments(pid) {
     fetch('/post/' + pid + '/comments')
         .then(r => r.json())
@@ -312,6 +329,66 @@ function openLightbox(src) {
     lb.innerHTML = '<img src="' + src + '">';
     lb.onclick = () => lb.remove();
     document.body.appendChild(lb);
+}
+
+// ===== МОДАЛЬНОЕ ОКНО СОЗДАНИЯ ПОСТА (кнопка +) =====
+let composeImage = null;
+function openComposeModal() {
+    document.getElementById('compose-modal').classList.add('visible');
+    setTimeout(() => document.getElementById('compose-modal-text').focus(), 100);
+}
+function closeComposeModal() {
+    document.getElementById('compose-modal').classList.remove('visible');
+    document.getElementById('compose-modal-text').value = '';
+    document.getElementById('compose-poll-question').value = '';
+    document.getElementById('compose-poll-options').value = '';
+    document.getElementById('compose-poll-box').style.display = 'none';
+    removeComposeImage();
+}
+function previewComposeImage(inp) {
+    if (!inp.files[0]) return;
+    composeImage = inp.files[0];
+    const r = new FileReader();
+    r.onload = e => {
+        const p = document.getElementById('compose-modal-preview');
+        document.getElementById('compose-modal-preview-img').src = e.target.result;
+        p.style.display = 'block';
+    };
+    r.readAsDataURL(composeImage);
+}
+function removeComposeImage() {
+    composeImage = null;
+    const p = document.getElementById('compose-modal-preview');
+    p.style.display = 'none';
+    document.getElementById('compose-modal-preview-img').src = '';
+}
+function submitComposeModal() {
+    const content = document.getElementById('compose-modal-text').value.trim();
+    const pollBox = document.getElementById('compose-poll-box');
+    const hasPoll = pollBox.style.display !== 'none';
+    const pollQ = document.getElementById('compose-poll-question').value.trim();
+    const pollOpts = document.getElementById('compose-poll-options').value.trim();
+    if (hasPoll && pollQ && pollOpts.split('\n').filter(o => o.trim()).length < 2) {
+        return flashToast('Минимум 2 варианта опроса');
+    }
+    if (!content && !composeImage && !(hasPoll && pollQ && pollOpts)) return flashToast('Пусто');
+    const fd = new FormData();
+    fd.append('content', content);
+    if (composeImage) fd.append('image', composeImage);
+    if (hasPoll && pollQ && pollOpts) {
+        fd.append('poll_question', pollQ);
+        fd.append('poll_options', pollOpts);
+    }
+    fetch('/post/create', { method: 'POST', body: fd })
+        .then(r => { if (r.redirected) { closeComposeModal(); location.reload(); } });
+}
+function togglePollInModal() {
+    const box = document.getElementById('compose-poll-box');
+    const btn = document.getElementById('poll-toggle-btn');
+    const visible = box.style.display !== 'none';
+    box.style.display = visible ? 'none' : 'block';
+    btn.classList.toggle('active', !visible);
+    if (!visible) document.getElementById('compose-poll-question').focus();
 }
 
 // ===== ЗАГРУЗКА АВАТАРА/ОБЛОЖКИ (через settings form-submit) =====
