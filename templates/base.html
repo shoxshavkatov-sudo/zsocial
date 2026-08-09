@@ -14,7 +14,7 @@
             try {
                 var t = localStorage.getItem('zs-theme');
                 if (!t) {
-                    var m = document.cookie.match(/(?:^|;\s*)theme=(dark|light)/);
+                    var m = document.cookie.match(/(?:^|;\s*)theme=(dark|light|black)/);
                     t = m ? m[1] : 'light';
                 }
                 document.documentElement.setAttribute('data-theme', t);
@@ -51,6 +51,7 @@
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
 <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></symbol>
+<symbol id="i-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2v20" stroke="#fff" stroke-width="0"/><path d="M12 2a10 10 0 000 20z" fill="currentColor" stroke="none"/></symbol>
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
 <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M4.9 4.9l14.2 14.2"/></symbol>
 <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22"/></symbol>
@@ -89,7 +90,9 @@
     {% endwith %}
 </div>
 
+<main id="app-main" class="app-main" data-endpoint="{{ request.endpoint }}">
 {% block body %}{% endblock %}
+</main>
 
 {% if cu %}
 {# === Верхний бар: поиск, группы, закладки, уведомления === #}
@@ -122,7 +125,7 @@
         </button>
         {% endif %}
         <button class="topbar-item topbar-theme" onclick="toggleTheme()" title="Сменить тему">
-            <svg class="icon"><use href="#i-{{ 'sun' if request.cookies.get('theme') == 'dark' else 'moon' }}"/></svg>
+            <svg class="icon"><use href="#i-{% set _t = request.cookies.get('theme') %}{% if _t == 'light' %}moon{% elif _t == 'dark' %}contrast{% elif _t == 'black' %}sun{% else %}moon{% endif %}"/></svg>
         </button>
     </div>
 </nav>

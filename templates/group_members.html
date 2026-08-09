@@ -1,22 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Участники — {{ g.name }}{% endblock %}
 {% block body %}
-<div style="padding:16px">
-    <a href="/group/{{ g.slug }}" style="font-size:13px;color:var(--highlight)">&larr; Назад</a>
-    <h2 style="margin:8px 0 16px">{{ g.name }} — участники</h2>
-    <div class="members-grid">
-    {% for m in members %}
-        <div class="member-card" onclick="location.href='/profile/{{ m.username }}'">
-            <img src="{{ _media_for(m.avatar) }}" alt="">
+<div class="gm-page">
+    <div class="gm-container">
+        <a href="/group/{{ g.slug }}" class="gm-back">
+            <svg class="icon"><use href="#i-arrow-left"/></svg>
+            Назад в группу
+        </a>
+
+        <div class="gm-header">
+            <img class="gm-avatar" src="{{ _media_for(g.cover) }}" alt="">
             <div>
-                <div class="m-name">{{ m.display_name or m.username }}{% if m.verified %} <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</div>
-                <div class="m-role">{{ m.role }}</div>
+                <h1>{{ g.name }}</h1>
+                <p class="gm-sub">{{ members|length }} участников</p>
             </div>
         </div>
-    {% endfor %}
+
+        {% if members %}
+        <div class="gm-list">
+        {% for m in members %}
+            <a href="/profile/{{ m.username }}" class="gm-member">
+                <img src="{{ _media_for(m.avatar) }}" alt="">
+                <div class="gm-info">
+                    <span class="gm-name">{{ m.display_name or m.username }}{% if m.verified %} <svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</span>
+                    <span class="gm-role">{{ m.role }}</span>
+                </div>
+                {% if m.role == 'owner' %}<span class="gm-badge-owner">Создатель</span>{% elif m.role == 'admin' %}<span class="gm-badge-admin">Админ</span>{% endif %}
+            </a>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg class="icon empty-icon"><use href="#i-users"/></svg>
+            <p>Пока нет участников</p>
+        </div>
+        {% endif %}
     </div>
-    {% if not members %}
-    <div class="empty-state"><p>Пока нет участников</p></div>
-    {% endif %}
 </div>
 {% endblock %}

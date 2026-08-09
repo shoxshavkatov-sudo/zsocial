@@ -1,46 +1,93 @@
 {% extends "base.html" %}
 {% block title %}Группы{% endblock %}
 {% block body %}
-<div class="container" style="padding:16px 16px 80px">
-    <div class="page-head" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-        <h2 style="margin:0">Группы</h2>
-        <a href="{{ url_for('create_group') }}" class="btn btn-primary"><svg class="icon icon-sm"><use href="#i-plus"/></svg> Создать группу</a>
+<div class="groups-page">
+
+    <!-- Шапка -->
+    <div class="gp-hero">
+        <div class="gp-hero-bg"></div>
+        <div class="gp-hero-content">
+            <h1>Сообщества</h1>
+            <p class="gp-hero-sub">Находите группы по интересам или создайте свою</p>
+            <a href="{{ url_for('create_group') }}" class="btn btn-primary">
+                <svg class="icon icon-sm"><use href="#i-plus"/></svg> Создать группу
+            </a>
+        </div>
     </div>
 
-    {% if my_groups %}
-    <h3>Мои группы</h3>
-    <div class="groups-grid" style="margin-bottom:24px">
-    {% for g in my_groups %}
-        <div class="group-card" onclick="location.href='/group/{{ g.slug }}'">
-            <img class="group-card-cover" src="{{ _media_for(g.cover) }}" alt="">
-            <div class="group-card-info">
-                <h3>{{ g.name }}</h3>
-                <div class="g-slug">@{{ g.slug }}</div>
-                {% if g.description %}<div class="g-desc">{{ g.description }}</div>{% endif %}
-                <div class="g-meta">{{ g.member_count }} участников</div>
-            </div>
-        </div>
-    {% endfor %}
-    </div>
-    {% endif %}
+    <div class="gp-container">
 
-    {% if all_groups %}
-    <h3>Все группы</h3>
-    <div class="groups-grid">
-    {% for g in all_groups %}
-        <div class="group-card" onclick="location.href='/group/{{ g.slug }}'">
-            <img class="group-card-cover" src="{{ _media_for(g.cover) }}" alt="">
-            <div class="group-card-info">
-                <h3>{{ g.name }}</h3>
-                <div class="g-slug">@{{ g.slug }} · {{ g.owner_name }}</div>
-                {% if g.description %}<div class="g-desc">{{ g.description }}</div>{% endif %}
-                <div class="g-meta">{{ g.member_count }} участников</div>
+        {% if my_groups %}
+        <section class="gp-section">
+            <div class="gp-section-head">
+                <div class="gp-section-title">
+                    <svg class="icon"><use href="#i-users"/></svg>
+                    <h2>Мои группы</h2>
+                </div>
+                <span class="gp-section-count">{{ my_groups|length }}</span>
             </div>
-        </div>
-    {% endfor %}
+            <div class="groups-grid">
+            {% for g in my_groups %}
+                <a href="/group/{{ g.slug }}" class="group-card">
+                    <div class="gc-cover-wrap">
+                        <img class="gc-cover" src="{{ _media_for(g.cover) }}" alt="">
+                    </div>
+                    <div class="gc-body">
+                        <h3>{{ g.name }}</h3>
+                        <div class="gc-slug">@{{ g.slug }}</div>
+                        {% if g.description %}<p class="gc-desc">{{ g.description }}</p>{% endif %}
+                        <div class="gc-footer">
+                            <span class="gc-members">
+                                <svg class="icon icon-sm"><use href="#i-user"/></svg>
+                                {{ g.member_count }}
+                            </span>
+                            {% if g.is_private %}<span class="gc-badge-private"><svg class="icon icon-sm"><use href="#i-lock"/></svg> Приватная</span>{% endif %}
+                        </div>
+                    </div>
+                </a>
+            {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="gp-section">
+            <div class="gp-section-head">
+                <div class="gp-section-title">
+                    <svg class="icon"><use href="#i-globe"/></svg>
+                    <h2>Все группы</h2>
+                </div>
+                {% if all_groups %}<span class="gp-section-count">{{ all_groups|length }}</span>{% endif %}
+            </div>
+            {% if all_groups %}
+            <div class="groups-grid">
+            {% for g in all_groups %}
+                <a href="/group/{{ g.slug }}" class="group-card">
+                    <div class="gc-cover-wrap">
+                        <img class="gc-cover" src="{{ _media_for(g.cover) }}" alt="">
+                    </div>
+                    <div class="gc-body">
+                        <h3>{{ g.name }}</h3>
+                        <div class="gc-slug">@{{ g.slug }} · {{ g.owner_name }}</div>
+                        {% if g.description %}<p class="gc-desc">{{ g.description }}</p>{% endif %}
+                        <div class="gc-footer">
+                            <span class="gc-members">
+                                <svg class="icon icon-sm"><use href="#i-user"/></svg>
+                                {{ g.member_count }}
+                            </span>
+                            {% if g.is_private %}<span class="gc-badge-private"><svg class="icon icon-sm"><use href="#i-lock"/></svg> Приватная</span>{% endif %}
+                        </div>
+                    </div>
+                </a>
+            {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <svg class="icon empty-icon"><use href="#i-users"/></svg>
+                <p>Пока нет групп</p>
+            </div>
+            {% endif %}
+        </section>
+
     </div>
-    {% else %}
-    <div class="empty-state"><svg class="icon empty-icon"><use href="#i-users"/></svg><p>Пока нет групп</p></div>
-    {% endif %}
 </div>
 {% endblock %}

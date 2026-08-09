@@ -10,6 +10,7 @@
         <h1>С возвращением</h1>
         <p class="auth-sub">Войдите в свой аккаунт</p>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-field">
                 <label>Имя пользователя или email</label>
                 <input class="input" name="login" placeholder="username" required autofocus>

@@ -29,6 +29,7 @@
             <img src="{{ media_url(cu.avatar) }}" class="avatar" alt="">
             <div class="composer-body">
                 <form method="POST" action="{{ url_for('create_post') }}" enctype="multipart/form-data" id="post-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <textarea name="content" placeholder="Что нового, {{ cu.username }}?" rows="2" maxlength="500" oninput="document.getElementById('cc').textContent=this.value.length"></textarea>
                     <div id="img-preview" class="composer-img-preview"></div>
                     <div class="composer-actions">

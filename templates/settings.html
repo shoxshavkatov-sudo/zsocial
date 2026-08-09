@@ -8,6 +8,7 @@
     </div>
 
     <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="settings-section">
             <h2>Профиль</h2>
             <p class="section-desc">Управляйте публичной информацией.</p>
@@ -51,10 +52,11 @@
         <div class="settings-section">
             <h2>Оформление</h2>
             <div class="settings-row">
-                <div class="settings-row-info"><div class="label">Тема</div><div class="desc">Светлая или тёмная.</div></div>
-                <div style="display:flex;gap:6px">
+                <div class="settings-row-info"><div class="label">Тема</div><div class="desc">Светлая, тёмная или чёрная (OLED).</div></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
                     <button type="button" class="btn btn-sm theme-btn" data-theme="light">Светлая</button>
                     <button type="button" class="btn btn-sm theme-btn" data-theme="dark">Тёмная</button>
+                    <button type="button" class="btn btn-sm theme-btn" data-theme="black">Чёрная</button>
                 </div>
             </div>
         </div>
@@ -70,6 +72,7 @@
         <h2>Безопасность</h2>
         <p class="section-desc">Смена пароля.</p>
         <form method="POST" action="{{ url_for('change_password') }}" style="display:flex;flex-direction:column;gap:10px;max-width:320px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input class="input" type="password" name="current_password" placeholder="Текущий пароль" required>
             <input class="input" type="password" name="new_password" placeholder="Новый пароль (мин. 6)" required minlength="6">
             <input class="input" type="password" name="confirm_password" placeholder="Повторите новый пароль" required>
@@ -82,10 +85,12 @@
         <div class="settings-row">
             <div class="settings-row-info"><div class="label">Выйти со всех устройств</div><div class="desc">Завершить все сессии, кроме текущей.</div></div>
             <form method="POST" action="{{ url_for('logout_all') }}"><button type="submit" class="btn btn-danger-outline btn-sm">Выйти везде</button></form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         </div>
         <div class="settings-row">
             <div class="settings-row-info"><div class="label">Удалить аккаунт</div><div class="desc">Безвозвратно. Все данные будут стёрты.</div></div>
             <form method="POST" action="{{ url_for('delete_account') }}" style="display:flex;gap:6px" onsubmit="return confirm('Удалить аккаунт навсегда?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input class="input" type="password" name="delete_password" placeholder="Пароль" required style="max-width:140px">
                 <button type="submit" class="btn btn-sm" style="background:var(--danger);color:white">Удалить</button>
             </form>

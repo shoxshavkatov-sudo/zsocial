@@ -11,17 +11,31 @@
         <img class="group-head-avatar" src="{{ media_url(g.cover) }}" alt="">
         <div class="group-head-info">
             <h2>{{ g.name }}
-                {% if g.is_private %}<svg class="icon icon-sm text-muted"><use href="#i-lock"/></svg>{% endif %}
+                {% if g.is_private %}<svg class="icon icon-sm" style="color:var(--warning)"><use href="#i-lock"/></svg>{% endif %}
             </h2>
-            <div class="group-head-meta">{{ members|length }} участников</div>
+            <div class="group-head-meta">
+                <span>{{ members|length }} участников</span>
+                {% if g.description %}<span class="group-head-desc-sep">·</span><span class="group-head-desc-short">{{ g.description[:50] }}{% if g.description|length > 50 %}…{% endif %}</span>{% endif %}
+            </div>
         </div>
     </div>
 
     {% if not am_member %}
     {# === Не участник — показываем описание + кнопка вступить === #}
-    <div class="group-join-prompt">
-        {% if g.description %}<p class="group-desc">{{ g.description }}</p>{% endif %}
-        <button class="btn btn-primary btn-full" onclick="joinGroup('{{ g.slug }}')">Вступить в группу</button>
+    <div class="group-join-card">
+        <div class="gjc-cover">
+            <img src="{{ media_url(g.cover) }}" alt="">
+        </div>
+        <div class="gjc-body">
+            {% if g.description %}<p class="group-desc">{{ g.description }}</p>{% endif %}
+            <div class="gjc-meta">
+                {{ members|length }} участников
+                {% if g.is_private %}<span class="gc-badge-private"><svg class="icon icon-sm"><use href="#i-lock"/></svg> Приватная</span>{% endif %}
+            </div>
+            <button class="btn btn-primary gjc-join-btn" onclick="joinGroup('{{ g.slug }}')">
+                <svg class="icon icon-sm"><use href="#i-check"/></svg> Вступить
+            </button>
+        </div>
     </div>
     {% else %}
 
@@ -36,12 +50,15 @@
     {% endif %}
 
     <div class="voice-rooms" id="voice-rooms">
+        {% if not voice_rooms %}
+        <div class="vr-empty">Голосовых комнат пока нет.{% if am_owner %} Создайте первую выше.{% endif %}</div>
+        {% endif %}
         {% for vr in voice_rooms %}
-        <div class="voice-room" data-room-id="{{ vr.id }}">
+        <div class="voice-room {% if vr.id == my_voice_room %}active{% endif %}" data-room-id="{{ vr.id }}">
             <div class="voice-room-head" onclick="toggleVoiceRoom({{ vr.id }})">
                 <svg class="icon"><use href="#i-volume"/></svg>
                 <span class="vr-name">{{ vr.name }}</span>
-                <span class="vr-count">{{ vr.participants_count }}</span>
+                <span class="vr-count"><svg class="icon icon-sm"><use href="#i-user"/></svg> {{ vr.participants_count }}</span>
             </div>
             <div class="voice-room-body">
                 <div class="voice-participants" id="vr-participants-{{ vr.id }}">
@@ -51,10 +68,13 @@
                         <span>{{ p.display_name or p.username }}</span>
                         {% if p.muted %}<svg class="icon icon-sm vr-muted"><use href="#i-mic-off"/></svg>{% endif %}
                     </div>
+                    {% else %}
+                    <span class="vr-empty">Никого нет в эфире</span>
                     {% endfor %}
                 </div>
                 {% if vr.id == my_voice_room %}
                 <div class="voice-controls" id="voice-controls-{{ vr.id }}">
+                    <span class="vc-status">Подключено</span>
                     <button class="vc-btn" id="vc-mute-btn" onclick="toggleVoiceMute({{ vr.id }})" title="Микрофон">
                         <svg class="icon"><use href="#i-mic"/></svg>
                     </button>

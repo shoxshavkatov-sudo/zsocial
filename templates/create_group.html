@@ -1,27 +1,86 @@
 {% extends "base.html" %}
 {% block title %}Создать группу{% endblock %}
 {% block body %}
-<div class="container" style="padding:16px 16px 80px">
-    <h2 style="margin:0 0 16px">Создать группу</h2>
-    <form method="POST" enctype="multipart/form-data" style="max-width:500px">
-        <div class="form-group">
-            <label>Название</label>
-            <input type="text" name="name" required maxlength="60" placeholder="Название группы">
+<div class="cg-page">
+    <div class="cg-container">
+        <a href="{{ url_for('groups') }}" class="cg-back">
+            <svg class="icon"><use href="#i-arrow-left"/></svg>
+            Назад к группам
+        </a>
+        <div class="cg-card">
+            <div class="cg-head">
+                <div class="cg-icon">
+                    <svg class="icon"><use href="#i-users"/></svg>
+                </div>
+                <h1>Новая группа</h1>
+                <p>Заполните информацию о сообществе</p>
+            </div>
+            <form method="POST" enctype="multipart/form-data" class="cg-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label>Название <span class="req">*</span></label>
+                    <input type="text" name="name" required maxlength="60" placeholder="Название группы" class="cg-input">
+                </div>
+                <div class="form-group">
+                    <label>Описание</label>
+                    <textarea name="description" rows="3" maxlength="300" placeholder="О чём ваша группа" class="cg-input"></textarea>
+                    <div class="cg-char-count"><span>0</span>/300</div>
+                </div>
+                <div class="form-group">
+                    <label>Обложка</label>
+                    <div class="cg-upload" id="cover-upload">
+                        <svg class="icon cg-upload-icon"><use href="#i-image"/></svg>
+                        <span>Нажмите для загрузки</span>
+                        <input type="file" name="cover" accept="image/*" class="cg-file-input" onchange="previewCoverUpload(this)">
+                    </div>
+                    <div class="cg-preview hidden" id="cover-preview">
+                        <img id="cover-preview-img" src="" alt="">
+                        <button type="button" class="remove-img-btn" onclick="removeCoverPreview()">
+                            <svg class="icon icon-sm"><use href="#i-x"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="cg-toggle-label">
+                        <div class="toggle" id="private-toggle" onclick="this.classList.toggle('on')"></div>
+                        <div>
+                            <span class="cg-toggle-title">Приватная группа</span>
+                            <span class="cg-toggle-desc">Только по приглашению или одобрению</span>
+                        </div>
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary cg-submit">
+                    <svg class="icon icon-sm"><use href="#i-check"/></svg>
+                    Создать группу
+                </button>
+            </form>
         </div>
-        <div class="form-group">
-            <label>Описание</label>
-            <textarea name="description" rows="3" maxlength="300" placeholder="О чём ваша группа"></textarea>
-        </div>
-        <div class="form-group">
-            <label>Обложка</label>
-            <input type="file" name="cover" accept="image/*">
-        </div>
-        <div class="form-group">
-            <label>
-                <input type="checkbox" name="is_private" value="1"> Приватная группа
-            </label>
-        </div>
-        <button type="submit" class="btn btn-primary">Создать</button>
-    </form>
+    </div>
 </div>
+
+<script>
+// Превью обложки при загрузке
+function previewCoverUpload(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            document.getElementById('cover-preview-img').src = e.target.result;
+            document.getElementById('cover-preview').classList.remove('hidden');
+            document.getElementById('cover-upload').classList.add('hidden');
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+function removeCoverPreview() {
+    document.getElementById('cover-preview').classList.add('hidden');
+    document.getElementById('cover-upload').classList.remove('hidden');
+    const fi = document.querySelector('.cg-file-input');
+    if (fi) fi.value = '';
+}
+// Счётчик символов
+document.querySelector('textarea[name="description"]')?.addEventListener('input', function() {
+    const counter = document.querySelector('.cg-char-count span');
+    if (counter) counter.textContent = this.value.length;
+});
+</script>
 {% endblock %}

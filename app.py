@@ -81,17 +81,44 @@ def serve_upload(filename):
     """
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-# Версия приложения — для cache-busting статики (каждый деплой = новый хэш)
-APP_VERSION = os.environ.get('RENDER_GIT_COMMIT', 'dev')[:8] or str(int(__import__('time').time()))
+# Версия приложения — для cache-busting статики.
+# В продакшене берём хэш коммита из env. Локально — mtime style.css/main.js,
+# чтобы при каждом изменении статики браузер гарантированно подхватывал обновления.
+_commit = os.environ.get('RENDER_GIT_COMMIT', '')
+if _commit:
+    APP_VERSION = _commit[:8]
+else:
+    import time as _t
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _mtime = 0
+    for _f in ('static/css/style.css', 'static/js/main.js'):
+        _p = os.path.join(_here, _f)
+        if os.path.isfile(_p):
+            _mtime = max(_mtime, int(os.path.getmtime(_p)))
+    APP_VERSION = str(_mtime or int(_t.time()))
 
 
 @app.after_request
 def no_cache_dynamic(resp):
-    """Запрещаем кэширование HTML страниц — чтобы после деплоя был свежий контент."""
-    if 'text/html' in (resp.headers.get('Content-Type') or ''):
+    """Кэш-стратегия:
+       — HTML: без кэша (свежий контент после деплоя);
+       — Статика (CSS/JS/шрифты/иконки): длинный кэш (1 год), т.к. URL несёт
+         ?v=<mtime> и при изменении файла версия меняется → браузер тянет свежую
+         копию, а между деплоями отдаёт из кэша (быстрее, меньше запросов);
+       — Загруженные медиа: средний кэш (1 час), чтобы не дёргать БД/диск лишний раз.
+    """
+    ct = resp.headers.get('Content-Type') or ''
+    if 'text/html' in ct:
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
+    elif '/static/' in (request.path or '') or any(ct.startswith(t) for t in
+            ('text/css', 'application/javascript', 'text/javascript', 'image/',
+             'font/', 'application/font', 'application/json')):
+        # Длинный кэш для версифицированной статики
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    elif request.path and request.path.startswith('/uploads/'):
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
     return resp
 
 

@@ -3,6 +3,21 @@
    ============================================ */
 
 // ===== CSRF: обёртка для AJAX + авто-инъекция в формы =====
+// Глобально доступна, чтобы SPA-навигация могла пере-инъектить после смены страницы.
+window.injectCSRF = function (root) {
+    const token = (document.querySelector('meta[name="csrf-token"]') || {}).getAttribute ?
+        document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+    if (!token) return;
+    const scope = root || document;
+    scope.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function (form) {
+        if (form.querySelector('input[name="csrf_token"]')) return;
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'csrf_token';
+        inp.value = token;
+        form.appendChild(inp);
+    });
+};
 (function () {
     function getCSRF() {
         const m = document.querySelector('meta[name="csrf-token"]');
@@ -15,7 +30,6 @@
         const method = (init.method || 'GET').toUpperCase();
         if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
             init.headers = init.headers || {};
-            // FormData не принимает set на чужом Headers — работаем с объектом
             if (init.headers && typeof init.headers.set === 'function') {
                 init.headers.set('X-CSRFToken', getCSRF());
             } else if (init.headers['X-CSRFToken'] === undefined) {
@@ -24,43 +38,47 @@
         }
         return _fetch(input, init);
     };
-    // Авто-инъекция скрытого input во все POST-формы
-    document.addEventListener('DOMContentLoaded', function () {
-        const token = getCSRF();
-        if (!token) return;
-        document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function (form) {
-            if (form.querySelector('input[name="csrf_token"]')) return;
-            const inp = document.createElement('input');
-            inp.type = 'hidden';
-            inp.name = 'csrf_token';
-            inp.value = token;
-            form.appendChild(inp);
-        });
-    });
+    // Первичная инъекция на DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', function () { window.injectCSRF(); });
 })();
 
 // ===== ТЕМА =====
+// Три темы: light → dark → black (OLED) → light
+const THEME_ORDER = ['light', 'dark', 'black'];
+// Иконка для каждой темы (показывает, ЧТО получится при переключении)
+const THEME_ICON = { light: 'moon', dark: 'contrast', black: 'sun' };
 function getTheme() {
     return localStorage.getItem('zs-theme') || 'light';
 }
 function applyTheme(t) {
+    if (!THEME_ORDER.includes(t)) t = 'light';
     document.documentElement.setAttribute('data-theme', t);
     localStorage.setItem('zs-theme', t);
     document.cookie = 'theme=' + t + ';path=/;max-age=31536000';
 }
+function _themeIcon(t) { return THEME_ICON[t] || 'moon'; }
 function toggleTheme() {
-    applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
-    // Обновить иконку в верхнем баре (тема теперь в topbar)
     const cur = getTheme();
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length];
+    applyTheme(next);
+    // Обновить иконку в навигации — показывает следующее состояние
+    const showIcon = _themeIcon(next);
     document.querySelectorAll('.topbar-theme .icon use, .bottombar-theme .icon use').forEach(u => {
-        u.setAttribute('href', '#i-' + (cur === 'dark' ? 'sun' : 'moon'));
+        u.setAttribute('href', '#i-' + showIcon);
     });
     // Подсветка кнопок в настройках
     document.querySelectorAll('.theme-btn').forEach(b => {
-        b.className = 'btn btn-sm ' + (b.dataset.theme === cur ? 'btn-primary' : 'btn-outline') + ' theme-btn';
+        b.className = 'btn btn-sm ' + (b.dataset.theme === next ? 'btn-primary' : 'btn-outline') + ' theme-btn';
     });
 }
 applyTheme(getTheme());
+// При загрузке — выставить правильную иконку
+document.addEventListener('DOMContentLoaded', () => {
+    const showIcon = _themeIcon(getTheme());
+    document.querySelectorAll('.topbar-theme .icon use, .bottombar-theme .icon use').forEach(u => {
+        u.setAttribute('href', '#i-' + showIcon);
+    });
+});
 
 // Кнопки темы в настройках
 document.addEventListener('DOMContentLoaded', () => {
@@ -710,17 +728,21 @@ let isCaller = false;
 let callWithVideo = false;
 let callTimer = null;
 let callStartTime = 0;
+let pendingCandidates = [];  // ICE-кандидаты, пришедшие ДО setRemoteDescription
 
 // ICE-серверы: STUN (для лёгких NAT) + TURN (для симметричного/жёсткого NAT,
-// например мобильные операторы). Используем бесплатный публичный relay OpenRelay.
+// например мобильные операторы). Несколько публичных STUN + TURN-серверы.
 const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        // OpenRelay — бесплатный публичный TURN-сервер (для строгих NAT)
-        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        // Metered TURN — для строгих NAT (симметричный/жёсткий).
+        { urls: 'turn:a.relay.metered.ca:80',    username: 'e593c81e73a1556cc6bf0a96', credential: 'kTKCzKpzH+Go1aBw' },
+        { urls: 'turn:a.relay.metered.ca:443',   username: 'e593c81e73a1556cc6bf0a96', credential: 'kTKCzKpzH+Go1aBw' },
+        { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'e593c81e73a1556cc6bf0a96', credential: 'kTKCzKpzH+Go1aBw' },
     ],
     iceTransportPolicy: 'all',
 };
@@ -758,16 +780,28 @@ function _registerCallListeners() {
         if (!pc) return;
         try {
             await pc.setRemoteDescription(new RTCSessionDescription(d.sdp));
+            // Применяем кандидаты, накопленные за время ожидания ответа
+            for (const c of pendingCandidates) {
+                try { await pc.addIceCandidate(c); } catch (e) {}
+            }
+            pendingCandidates = [];
             _setStatus('Соединение установлено');
             _startCallTimer();
         } catch (e) { console.error('setRemoteDescription (answer):', e); }
     });
 
-    // ICE-кандидат от собеседника
+    // ICE-кандидат от собеседника.
+    // ВАЖНО: кандидаты могут прийти ДО того, как мы приняли звонок и создали pc
+    // (на стороне callee) — буферизуем их и применяем после setRemoteDescription.
     chatSocket.on('call_ice', async (d) => {
-        if (pc && d.candidate) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch (e) {}
-        }
+        if (!d.candidate) return;
+        try {
+            if (pc && pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(d.candidate));
+            } else {
+                pendingCandidates.push(new RTCIceCandidate(d.candidate));
+            }
+        } catch (e) { console.warn('addIceCandidate:', e); }
     });
 
     // Завершение звонка собеседником
@@ -789,7 +823,7 @@ async function startCall(partnerId, partnerName, video) {
     callWithVideo = !!video;
     isCaller = true;
 
-    _showCallOverlay();
+    _showCallOverlay('active');
     _setStatus('Звоним...');
 
     try {
@@ -829,9 +863,9 @@ async function startCall(partnerId, partnerName, video) {
 function _createPeerConnection() {
     pc = new RTCPeerConnection(ICE_SERVERS);
 
-    // Отправляем свои ICE-кандидаты
+    // Отправляем свои ICE-кандидаты (trickle ICE)
     pc.onicecandidate = (e) => {
-        if (e.candidate && chatSocket) {
+        if (e.candidate && chatSocket && callPartnerId) {
             chatSocket.emit('call_ice', { to: callPartnerId, candidate: e.candidate });
         }
     };
@@ -847,11 +881,27 @@ function _createPeerConnection() {
         if (ra && e.streams[0]) ra.srcObject = e.streams[0];
     };
 
-    pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
+    pc.oniceconnectionstatechange = () => {
+        const st = pc.iceConnectionState;
+        console.log('[call] ICE:', st);
+        if (st === 'connected') {
             _setStatus('В разговоре');
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-            _endCall('failed');
+        } else if (st === 'checking') {
+            _setStatus('Соединение...');
+        } else if (st === 'disconnected') {
+            _setStatus('Сигнал потерян...');
+        } else if (st === 'failed') {
+            console.warn('[call] ICE failed — TURN мог быть недоступен');
+            _setStatus('Сбой соединения');
+            setTimeout(() => _endCall('failed'), 2000);
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        console.log('[call] PC:', pc.connectionState);
+        if (pc.connectionState === 'failed') {
+            _setStatus('Сбой соединения');
+            setTimeout(() => _endCall('failed'), 2000);
         }
     };
 }
@@ -861,11 +911,9 @@ let pendingOffer = null;  // SDP offer от звонящего
 
 function _showIncomingCall(d) {
     pendingOffer = d.sdp;  // сохраняем offer для acceptCall
-    _showCallOverlay();
+    _showCallOverlay('incoming');
     document.getElementById('call-status').textContent = 'Входящий ' + (callWithVideo ? 'видеозвонок' : 'звонок');
     document.getElementById('call-name').textContent = callPartnerName;
-    document.getElementById('incoming-buttons').style.display = 'flex';
-    document.getElementById('active-buttons').style.display = 'none';
 }
 
 async function acceptCall() {
@@ -897,6 +945,11 @@ async function acceptCall() {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         chatSocket.emit('call_answer', { to: callPartnerId, sdp: answer });
+        // Применяем кандидаты, накопленные до принятия звонка
+        for (const c of pendingCandidates) {
+            try { await pc.addIceCandidate(c); } catch (e) {}
+        }
+        pendingCandidates = [];
         _startCallTimer();
     } catch (e) {
         console.error('acceptCall:', e);
@@ -923,7 +976,9 @@ function _endCall(reason) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
     }
+    pendingCandidates = [];
     callPartnerId = null;
+    pendingOffer = null;
     _hideCallOverlay();
 }
 
@@ -951,7 +1006,8 @@ function toggleCam() {
 }
 
 // ─── UI оверлея ───
-function _showCallOverlay() {
+// showButtons: 'incoming' | 'active' | null (не менять)
+function _showCallOverlay(showButtons) {
     let ov = document.getElementById('call-overlay');
     if (!ov) {
         // динамически создаём, если отсутствует (другая страница)
@@ -964,8 +1020,14 @@ function _showCallOverlay() {
     document.getElementById('local-video').style.display = callWithVideo ? 'block' : 'none';
     document.getElementById('avatar-call').style.display = callWithVideo ? 'none' : 'flex';
     document.getElementById('call-timer').textContent = '00:00';
-    document.getElementById('incoming-buttons').style.display = 'none';
-    document.getElementById('active-buttons').style.display = 'flex';
+    // Кнопки управляются вызывающей функцией, а не оверлеем
+    if (showButtons === 'incoming') {
+        document.getElementById('incoming-buttons').style.display = 'flex';
+        document.getElementById('active-buttons').style.display = 'none';
+    } else if (showButtons === 'active') {
+        document.getElementById('incoming-buttons').style.display = 'none';
+        document.getElementById('active-buttons').style.display = 'flex';
+    }
 }
 function _hideCallOverlay() {
     const ov = document.getElementById('call-overlay');
@@ -1172,13 +1234,27 @@ function createVoiceRoom(slug) {
     const name = (inp && inp.value.trim()) || 'Голосовая';
     const fd = new FormData();
     fd.append('name', name);
-    fetch('/group/' + slug + '/voice/create', {
-        method: 'POST', body: fd,
-        headers: { 'X-CSRFToken': (document.querySelector('meta[name=csrf-token]') || {}).content || '' }
-    }).then(r => r.json()).then(d => {
-        if (d.error) return flashToast(d.error);
-        location.reload();
-    });
+    // fetch-обёртка сама добавит X-CSRFToken
+    fetch('/group/' + slug + '/voice/create', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) return flashToast(d.error);
+            flashToast('Комната создана');
+            // SPA: перезагружаем только содержимое группы
+            setTimeout(() => {
+                if (globalThis.__spaNavigate) globalThis.__spaNavigate(location.href, false);
+                else location.reload();
+            }, 400);
+        })
+        .catch(() => flashToast('Ошибка создания комнаты'));
+}
+
+// Свернуть/развернуть тело голосовой комнаты
+function toggleVoiceRoom(roomId) {
+    const room = document.querySelector('.voice-room[data-room-id="' + roomId + '"]');
+    if (!room) return;
+    const body = room.querySelector('.voice-room-body');
+    if (body) body.style.display = (body.style.display === 'none') ? '' : 'none';
 }
 
 
@@ -1248,8 +1324,8 @@ async function joinVoiceRoom(roomId) {
     voiceMuted = false;
     _bindVoiceEvents();
     voiceSocket.emit('voice_join', { room_id: roomId, name: document.body.dataset.userName });
-    // Показываем панель управления
-    location.reload();
+    // Обновляем UI без перезагрузки: отмечаем комнату активной, показываем панель управления
+    _refreshVoiceRoomUI(roomId, true);
 }
 
 function leaveVoiceRoom(roomId) {
@@ -1263,7 +1339,7 @@ function leaveVoiceRoom(roomId) {
         voiceLocalStream = null;
     }
     voiceCurrentRoom = null;
-    location.reload();
+    _refreshVoiceRoomUI(roomId, false);
 }
 
 function toggleVoiceMute(roomId) {
@@ -1272,11 +1348,69 @@ function toggleVoiceMute(roomId) {
         voiceLocalStream.getAudioTracks().forEach(t => t.enabled = !voiceMuted);
     }
     if (voiceSocket) voiceSocket.emit('voice_mute', { room_id: roomId, muted: voiceMuted });
-    const btn = document.getElementById('vc-mute-btn');
-    if (btn) {
+    // Обновляем ВСЕ кнопки mute (в комнате + плавающая панель)
+    document.querySelectorAll('#vc-mute-btn, .vf-mute-btn').forEach(btn => {
         btn.classList.toggle('muted', voiceMuted);
         btn.querySelector('use').setAttribute('href', voiceMuted ? '#i-mic-off' : '#i-mic');
+    });
+}
+
+// Перерисовка UI голосовой комнаты при входе/выходе (без перезагрузки страницы)
+function _refreshVoiceRoomUI(roomId, joined) {
+    const room = document.querySelector('.voice-room[data-room-id="' + roomId + '"]');
+    if (room) {
+        room.classList.toggle('active', joined);
+        const body = room.querySelector('.voice-room-body');
+        if (body) {
+            if (joined) {
+                // Заменяем кнопку «Войти» на панель управления
+                const joinBtn = body.querySelector('.vc-join');
+                if (joinBtn) {
+                    const ctrl = document.createElement('div');
+                    ctrl.className = 'voice-controls';
+                    ctrl.innerHTML =
+                        '<span class="vc-status">Подключено</span>' +
+                        '<button class="vc-btn" id="vc-mute-btn" onclick="toggleVoiceMute(' + roomId + ')" title="Микрофон">' +
+                        '<svg class="icon"><use href="#i-mic"/></svg></button>' +
+                        '<button class="vc-btn vc-leave" onclick="leaveVoiceRoom(' + roomId + ')" title="Покинуть">' +
+                        '<svg class="icon"><use href="#i-phone-off"/></svg></button>';
+                    joinBtn.replaceWith(ctrl);
+                }
+            } else {
+                // Возвращаем кнопку «Войти»
+                const ctrl = body.querySelector('.voice-controls');
+                if (ctrl) {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-sm btn-primary vc-join';
+                    btn.setAttribute('onclick', 'joinVoiceRoom(' + roomId + ')');
+                    btn.innerHTML = '<svg class="icon icon-sm"><use href="#i-phone"/></svg> Войти';
+                    ctrl.replaceWith(btn);
+                }
+            }
+        }
     }
+    // Плавающая панель управления (как в Discord) — всегда видна во время разговора
+    _refreshVoiceFloat(joined);
+}
+
+function _refreshVoiceFloat(joined) {
+    let f = document.getElementById('voice-float');
+    if (!joined) { if (f) f.remove(); return; }
+    const room = document.querySelector('.voice-room.active .vr-name');
+    const name = room ? room.textContent.trim() : 'Голосовая';
+    if (!f) {
+        f = document.createElement('div');
+        f.id = 'voice-float';
+        f.className = 'voice-float';
+        document.body.appendChild(f);
+    }
+    f.innerHTML =
+        '<div class="vf-info"><span class="vf-name">' + esc(name) + '</span>' +
+        '<span class="vf-status">Голосовой чат</span></div>' +
+        '<button class="vc-btn vf-mute-btn" onclick="toggleVoiceMute(' + voiceCurrentRoom + ')" title="Микрофон">' +
+        '<svg class="icon"><use href="#i-mic"/></svg></button>' +
+        '<button class="vc-btn vc-leave" onclick="leaveVoiceRoom(' + voiceCurrentRoom + ')" title="Покинуть">' +
+        '<svg class="icon"><use href="#i-phone-off"/></svg></button>';
 }
 
 function _createVoicePeer(userId, isOfferer) {
@@ -1362,3 +1496,228 @@ function _removeVoiceParticipantEl(userId) {
     const el = document.querySelector('.voice-participant[data-uid="' + userId + '"]');
     if (el) el.remove();
 }
+
+
+// ===================================================================
+//  SPA-НАВИГАЦИЯ (плавные переходы без перезагрузки страницы)
+//  PJAX: перехватываем внутренние ссылки, грузим страницу через fetch,
+//  меняем содержимое <main id="app-main"> с плавной анимацией.
+//  Используем View Transitions API где поддерживается, fallback на CSS.
+// ===================================================================
+(function () {
+    'use strict';
+
+    const SPA_SELECTOR = 'a[href]:not([target="_blank"]):not([download])';
+    let spaEnabled = 'PushManager' in window && history.pushState;
+    let isNavigating = false;
+
+    function _sameOrigin(url) {
+        try { return new URL(url, location.href).origin === location.origin; }
+        catch (e) { return false; }
+    }
+
+    // Внутренние ссылки, которые не должны идти через SPA:
+    // якоря, внешние, загрузки, и страницы с особыми состояниями (логаут).
+    function _shouldSpa(url) {
+        if (!spaEnabled || !_sameOrigin(url)) return false;
+        const u = new URL(url, location.href);
+        // Разрешаем только GET-страницы приложения.
+        if (u.hash && u.pathname === location.pathname) return false;
+        if (/\/(logout|uploads\/)/.test(u.pathname)) return false;
+        return true;
+    }
+
+    function _applyTransition(updateFn) {
+        const wrap = () => {
+            updateFn();
+            // Прокрутка наверх после смены страницы
+            window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+        };
+        if (document.startViewTransition) {
+            document.startViewTransition(wrap);
+        } else {
+            // Fallback: плавный fade через класс
+            const main = document.getElementById('app-main');
+            if (main) {
+                main.classList.add('spa-leaving');
+                setTimeout(() => { wrap(); main.classList.remove('spa-leaving'); main.classList.add('spa-entering'); }, 160);
+                setTimeout(() => main.classList.remove('spa-entering'), 320);
+            } else {
+                wrap();
+            }
+        }
+    }
+
+    async function _navigate(url, push) {
+        if (isNavigating) return;
+        isNavigating = true;
+        document.body.classList.add('spa-loading');
+        try {
+            const resp = await fetch(url, { headers: { 'X-SPA': '1' }, credentials: 'same-origin' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const ct = resp.headers.get('Content-Type') || '';
+            if (!ct.includes('text/html')) { location.href = url; return; }
+            const html = await resp.text();
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const newMain = doc.getElementById('app-main');
+            if (!newMain) { location.href = url; return; }
+
+            _applyTransition(() => {
+                const oldMain = document.getElementById('app-main');
+                if (oldMain) oldMain.replaceWith(newMain);
+                // Обновляем заголовок
+                document.title = doc.title || document.title;
+                // Меняем активные подсветки в навигации
+                const ep = newMain.getAttribute('data-endpoint');
+                _updateNavActive(ep);
+                // Переносим flash-сообщения
+                _syncFlashes(doc);
+                // Пере-инъектируем CSRF в формы новой страницы
+                if (window.injectCSRF) window.injectCSRF(newMain);
+                // Выполняем инлайн-скрипты новой страницы:
+                // 1) внутри <main> (встроенные в тело страницы)
+                _runInlineScripts(newMain);
+                // 2) вне <main> — это {% block scripts %} из base.html
+                doc.querySelectorAll('body > script:not([src])').forEach(old => {
+                    const s = document.createElement('script');
+                    s.textContent = old.textContent;
+                    document.body.appendChild(s);
+                    // Выполняется один раз при вставке; убираем после.
+                    setTimeout(() => s.remove(), 0);
+                });
+                // 3) data-init атрибут для страниц вроде чата
+                if (ep === 'chat') _initChatAfterSpa(newMain);
+            });
+
+            if (push !== false) history.pushState({ spa: true, url }, '', url);
+        } catch (e) {
+            console.warn('SPA nav failed, fallback:', e);
+            location.href = url;
+        } finally {
+            isNavigating = false;
+            document.body.classList.remove('spa-loading');
+        }
+    }
+
+    function _updateNavActive(endpoint) {
+        document.querySelectorAll('.topbar-item, .bottombar-item').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        if (!endpoint) return;
+        const map = {
+            feed: '.bottombar-item[title="Лента"]',
+            chat: '.bottombar-item[title="Сообщения"]',
+            people: '.topbar-item[title="Поиск людей"]',
+            groups: '.topbar-item[title="Группы"]',
+            bookmarks: '.topbar-item[title="Закладки"]',
+            notifications: '.topbar-item[title="Уведомления"]',
+            admin: '.topbar-item[title="Админ-панель"]',
+            profile: '.bottombar-item[title="Профиль"]',
+            settings: '.bottombar-item[title="Профиль"]',
+        };
+        const sel = map[endpoint];
+        if (sel) { const el = document.querySelector(sel); if (el) el.classList.add('active'); }
+    }
+
+    function _syncFlashes(doc) {
+        const cont = document.getElementById('flash-container');
+        if (!cont) return;
+        cont.innerHTML = '';
+        const newFlashes = doc.querySelectorAll('#flash-container > .flash');
+        newFlashes.forEach(f => cont.appendChild(f.cloneNode(true)));
+        // авто-скрытие через 4с
+        setTimeout(() => {
+            cont.querySelectorAll('.flash').forEach(f => { f.style.opacity = '0'; setTimeout(() => f.remove(), 300); });
+        }, 4000);
+    }
+
+    function _runInlineScripts(root) {
+        // Инлайн-скрипты НЕ выполняются при вставке через innerHTML/replaceWith,
+        // поэтому перепривязываем их вручную.
+        root.querySelectorAll('script').forEach(old => {
+            const s = document.createElement('script');
+            if (old.src) { s.src = old.src; } else { s.textContent = old.textContent; }
+            old.replaceWith(s);
+        });
+    }
+
+    // Перехват кликов по ссылкам <a>
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest(SPA_SELECTOR);
+        if (!a) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        const href = a.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        if (!_shouldSpa(a.href)) return;
+        e.preventDefault();
+        _navigate(a.href, true);
+    }, true);
+
+    // Перехват location.href через monkey-patch (кнопки используют onclick)
+    // Нельзя переопределить location.href как сеттер в большинстве браузеров,
+    // поэтому задаём обработчик на capture-фазе для кликов по [onclick*=location.href]
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('[onclick*="location.href"]');
+        if (!el) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        const m = (el.getAttribute('onclick') || '').match(/location\.href\s*=\s*['"]([^'"]+)['"]/);
+        if (!m) return;
+        const url = m[1];
+        if (!_shouldSpa(url)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        _navigate(new URL(url, location.href).href, true);
+    }, true);
+
+    // Кнопки «назад/вперёд»
+    window.addEventListener('popstate', (e) => {
+        const url = (e.state && e.state.url) || location.href;
+        _navigate(url, false);
+    });
+
+    // Предзагрузка при наведении на ссылку (быстрее переход)
+    let preloadAbort = null;
+    document.addEventListener('mouseover', (e) => {
+        const a = e.target.closest(SPA_SELECTOR);
+        if (!a || !_shouldSpa(a.href)) return;
+        if (a.dataset.preloaded) return;
+        a.dataset.preloaded = '1';
+        // Просто прогреваем соединение (dns/prefetch), без полной загрузки
+        const link = document.createElement('link');
+        link.rel = 'prefetch';
+        link.href = a.href;
+        document.head.appendChild(link);
+    }, { passive: true });
+
+    // Помечаем начальное состояние
+    history.replaceState({ spa: true, url: location.href }, '', location.href);
+
+    // Экспортируем _navigate для использования вне IIFE (напр., createVoiceRoom)
+    globalThis.__spaNavigate = function (url, push) { _navigate(url, push); };
+
+    // ===== Инциализация чата после SPA-перехода =====
+    // Пересоздаём состояние сокета/звонков при заходе на страницу чата.
+    window._initChatAfterSpa = function (root) {
+        // Сбрасываем старый сокет чата, чтобы не было дублей слушателей
+        try { if (window.chatSocket) { window.chatSocket.disconnect(); window.chatSocket = null; } } catch (e) {}
+        const uid = document.body.getAttribute('data-user-id');
+        if (!uid) return;
+        // partnerId берём из data-атрибута, который chat.html выставляет на .chat-page
+        const chatPage = root.querySelector('#chat-page');
+        const partnerId = chatPage ? chatPage.getAttribute('data-partner-id') : null;
+        if (window.initSocket && partnerId) {
+            // Небольшая задержка — даём сокету подключиться
+            setTimeout(() => {
+                try { window.initSocket(Number(uid), Number(partnerId)); } catch (e) { console.warn(e); }
+                if (window._registerCallListeners) window._registerCallListeners();
+            }, 80);
+        }
+        // Скролл вниз + скрытие баров на мобиле
+        const c = document.getElementById('chat-messages');
+        if (c) c.scrollTop = c.scrollHeight;
+        if (window.innerWidth <= 768 && chatPage && chatPage.classList.contains('show-window')) {
+            document.body.classList.add('chat-active');
+        }
+    };
+})();
+

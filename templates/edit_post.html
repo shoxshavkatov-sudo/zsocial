@@ -8,6 +8,7 @@
     </div>
     <div style="padding:16px">
         <form method="POST" id="edit-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <textarea name="content" rows="5" maxlength="500"
                 style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);font-size:15px;resize:vertical;outline:none;font-family:inherit"
                 oninput="document.getElementById('cc').textContent=this.value.length">{{ post.content }}</textarea>

@@ -9,7 +9,7 @@
         {% if post.quote %}<span class="text-muted">: {{ post.quote[:100] }}</span>{% endif %}
     </div>
     {% if post.image %}
-    <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" onclick="window.open('{{ media_url(post.image) }}')"></div>
+    <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" loading="lazy" decoding="async" onclick="window.open('{{ media_url(post.image) }}')"></div>
     {% endif %}
     <div class="repost-original">
     <div class="post-head">
@@ -41,7 +41,7 @@
 
     {% if post.content %}<div class="post-body">{{ post.content | render_text | safe }}</div>{% endif %}
     {% if post.image and not post.parent_id %}
-    <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" onclick="window.open('{{ media_url(post.image) }}')"></div>
+    <div class="post-image-wrap"><img src="{{ media_url(post.image) }}" loading="lazy" decoding="async" onclick="window.open('{{ media_url(post.image) }}')"></div>
     {% endif %}
 
     {# === Опрос === #}

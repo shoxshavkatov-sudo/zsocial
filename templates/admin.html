@@ -79,6 +79,7 @@
             <td class="text-sm"><span style="color:var(--danger)">♥ {{ p.like_count }}</span> · <span>💬 {{ p.comment_count }}</span></td>
             <td>
                 <form method="POST" action="{{ url_for('delete_post', pid=p.id) }}" onsubmit="return confirm('Удалить?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-danger-outline btn-sm"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>
                 </form>
             </td>
@@ -120,6 +121,7 @@
 
     {% elif tab == 'system' %}
     <form method="POST" action="{{ url_for('admin_settings_save') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="system-setting">
             <div class="system-setting-info"><div class="label">Название сайта</div><div class="desc">В шапке и логотипе.</div></div>
             <input class="input" name="site_name" value="{{ site.site_name }}" style="max-width:240px">

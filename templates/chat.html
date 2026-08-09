@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Сообщения · {{ site_name }}{% endblock %}
 {% block body %}
-<div class="chat-page {% if partner %}show-window{% endif %}" id="chat-page">
+<div class="chat-page {% if partner %}show-window{% endif %}" id="chat-page" {% if partner %}data-partner-id="{{ partner.id }}"{% endif %}>
     <div class="chat-list-panel">
         <div class="chat-list-header"><h2>Сообщения</h2></div>
         <div class="chat-list">
@@ -206,6 +206,26 @@
 {% if partner %}
 <script>
     document.body.dataset.userName = '{{ (cu.display_name or cu.username)|replace("'", "\\'") }}';
+    // На мобиле — прячем бары, чат на весь экран
+    if (window.innerWidth <= 768) {
+        document.body.classList.add('chat-active');
+        document.body.classList.remove('has-topbar', 'has-bottombar');
+        document.body.style.paddingTop = '0';
+        document.body.style.paddingBottom = '0';
+    }
+    window.addEventListener('resize', () => {
+        if (window.innerWidth <= 768) {
+            document.body.classList.add('chat-active');
+            document.body.classList.remove('has-topbar', 'has-bottombar');
+            document.body.style.paddingTop = '0';
+            document.body.style.paddingBottom = '0';
+        } else {
+            document.body.classList.remove('chat-active');
+            document.body.classList.add('has-topbar', 'has-bottombar');
+            document.body.style.paddingTop = '';
+            document.body.style.paddingBottom = '';
+        }
+    });
     setTimeout(() => {
         const c = document.getElementById('chat-messages');
         if (c) c.scrollTop = c.scrollHeight;

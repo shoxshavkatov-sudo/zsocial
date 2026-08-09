@@ -10,6 +10,7 @@
         <h1>Создать аккаунт</h1>
         <p class="auth-sub">Присоединяйтесь к профессиональной сети</p>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-field">
                 <label>Имя пользователя</label>
                 <input class="input" name="username" required minlength="3" placeholder="username" autofocus>
