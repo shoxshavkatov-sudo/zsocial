@@ -417,9 +417,33 @@ def migrate_db():
             FOREIGN KEY (room_id) REFERENCES voice_rooms(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )'''),
+        ('stories', '''CREATE TABLE IF NOT EXISTS stories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            media TEXT NOT NULL,
+            media_type TEXT DEFAULT 'image',
+            caption TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )'''),
+        ('story_views', '''CREATE TABLE IF NOT EXISTS story_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            story_id INTEGER NOT NULL,
+            viewer_id INTEGER NOT NULL,
+            viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(story_id, viewer_id),
+            FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+            FOREIGN KEY (viewer_id) REFERENCES users(id) ON DELETE CASCADE
+        )'''),
     ]:
         if tname not in tables:
             conn.execute(tsql)
+
+    # Доп. колонки в messages для ответов/редактирования (Этап 2)
+    msg_cols = [r[1] for r in conn.execute('PRAGMA table_info(messages)').fetchall()]
+    for col, typedef in {'reply_to_id': 'INTEGER', 'edited_at': 'TIMESTAMP'}.items():
+        if col not in msg_cols:
+            conn.execute(f'ALTER TABLE messages ADD COLUMN {col} {typedef}')
 
     # === Индексы для производительности (IF NOT EXISTS — идемпотентно) ===
     conn.executescript('''
@@ -437,6 +461,9 @@ def migrate_db():
         CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
         CREATE INDEX IF NOT EXISTS idx_notifs_user_read ON notifications(user_id, is_read);
         CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions(message_id);
+        CREATE INDEX IF NOT EXISTS idx_stories_user ON stories(user_id);
+        CREATE INDEX IF NOT EXISTS idx_stories_created ON stories(created_at);
+        CREATE INDEX IF NOT EXISTS idx_story_views_story ON story_views(story_id);
     ''')
 
     conn.commit()
@@ -573,6 +600,22 @@ class User:
     def get_all():
         db = get_db()
         return db.execute('SELECT * FROM users ORDER BY created_at DESC').fetchall()
+
+    @staticmethod
+    def get_suggested(uid, limit=8):
+        """Рекомендации: пользователи, на которых не подписан uid, упорядоченные по активности."""
+        db = get_db()
+        rows = db.execute('''
+            SELECT u.id, u.username, u.display_name, u.avatar, u.verified,
+                   (SELECT COUNT(*) FROM posts WHERE user_id=u.id) AS post_count,
+                   (SELECT COUNT(*) FROM follows WHERE followed_id=u.id) AS follower_count,
+                   EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followed_id=u.id) AS is_following
+            FROM users u
+            WHERE u.id != ? AND u.is_private=0
+            ORDER BY follower_count DESC, post_count DESC
+            LIMIT ?
+        ''', (uid, uid, limit)).fetchall()
+        return rows
 
 
 class Post:
@@ -719,6 +762,31 @@ class Post:
                 all_tags[tag] = all_tags.get(tag, 0) + 1
         return sorted(all_tags.items(), key=lambda x: x[1], reverse=True)[:limit]
 
+    @staticmethod
+    def get_popular(page=1, per_page=12):
+        """Популярные посты за 7 дней по лайкам + комментариям."""
+        db = get_db()
+        offset = (page - 1) * per_page
+        rows = db.execute('''
+            SELECT p.*, u.username, u.display_name, u.avatar, u.verified,
+                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
+                   (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count
+            FROM posts p JOIN users u ON p.user_id=u.id
+            WHERE p.created_at >= datetime('now', '-7 days')
+              AND p.parent_id IS NULL
+              AND u.is_private=0
+            ORDER BY (SELECT COUNT(*) FROM likes WHERE post_id=p.id) +
+                     (SELECT COUNT(*) FROM comments WHERE post_id=p.id) DESC,
+                     p.created_at DESC
+            LIMIT ? OFFSET ?
+        ''', (per_page, offset)).fetchall()
+        total = db.execute('''
+            SELECT COUNT(*) c FROM posts p JOIN users u ON p.user_id=u.id
+            WHERE p.created_at >= datetime('now', '-7 days')
+              AND p.parent_id IS NULL AND u.is_private=0
+        ''').fetchone()['c']
+        return rows, total
+
 
 class Like:
     @staticmethod
@@ -825,21 +893,41 @@ class Follow:
 
 class Message:
     @staticmethod
-    def create(s, r, content, msg_type='text', file_url=None, file_name=None, file_size=0, duration=0):
+    def create(s, r, content, msg_type='text', file_url=None, file_name=None, file_size=0, duration=0, reply_to_id=None):
         db = get_db()
         db.execute('''INSERT INTO messages
-            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration)
-            VALUES (?,?,?,?,?,?,?,?)''',
-            (s, r, content, msg_type, file_url, file_name, file_size, duration))
+            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration, reply_to_id)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (s, r, content, msg_type, file_url, file_name, file_size, duration, reply_to_id))
         db.commit()
         return db.execute('SELECT * FROM messages WHERE id = last_insert_rowid()').fetchone()
+
+    @staticmethod
+    def edit(mid, uid, content, window_minutes=15):
+        """Редактирование сообщения (только своё, в течение window_minutes минут)."""
+        from datetime import datetime, timedelta
+        db = get_db()
+        m = db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
+        if not m or m['sender_id'] != uid:
+            return False
+        created = datetime.strptime(m['created_at'], '%Y-%m-%d %H:%M:%S')
+        if datetime.utcnow() - created > timedelta(minutes=window_minutes):
+            return False
+        db.execute('UPDATE messages SET content=?, edited_at=CURRENT_TIMESTAMP WHERE id=?', (content, mid))
+        db.commit()
+        return True
 
     @staticmethod
     def get_conversation(a, b):
         db = get_db()
         return db.execute('''
-            SELECT m.*, u.username, u.avatar, u.verified
-            FROM messages m JOIN users u ON m.sender_id = u.id
+            SELECT m.*, u.username, u.avatar, u.verified,
+                   rm.content AS reply_to_content,
+                   ru.username AS reply_to_username
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            LEFT JOIN messages rm ON m.reply_to_id = rm.id
+            LEFT JOIN users ru ON rm.sender_id = ru.id
             WHERE (m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?)
             ORDER BY m.created_at ASC
         ''', (a, b, b, a)).fetchall()
@@ -1152,6 +1240,18 @@ class Group:
         db = get_db()
         return db.execute(Post._feed_where('AND p.group_id = ?'), (gid,)).fetchall()
 
+    @staticmethod
+    def get_popular(limit=6):
+        """Популярные группы по количеству участников."""
+        db = get_db()
+        return db.execute('''
+            SELECT g.*,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) AS member_count
+            FROM groups g
+            ORDER BY member_count DESC
+            LIMIT ?
+        ''', (limit,)).fetchall()
+
 
 class GroupMessage:
     """Сообщения в групповом чате (как в Telegram)."""
@@ -1288,3 +1388,130 @@ class SiteSettings:
         db.commit()
         if cls._cache is not None:
             cls._cache[key] = value
+
+
+class Story:
+    """Истории — исчезающие фото/видео на 24 часа."""
+    LIFETIME_HOURS = 24
+
+    @staticmethod
+    def create(user_id, media, media_type='image', caption=None):
+        db = get_db()
+        db.execute('INSERT INTO stories (user_id, media, media_type, caption) VALUES (?, ?, ?, ?)',
+                   (user_id, media, media_type, caption))
+        db.commit()
+        return db.execute('SELECT * FROM stories WHERE id = last_insert_rowid()').fetchone()
+
+    @staticmethod
+    def get(sid):
+        db = get_db()
+        return db.execute('SELECT * FROM stories WHERE id = ?', (sid,)).fetchone()
+
+    @staticmethod
+    def cleanup_expired():
+        """Удаляет истории старше 24 часов. Возвращает количество удалённых."""
+        db = get_db()
+        cur = db.execute(
+            "DELETE FROM stories WHERE created_at < datetime('now', ?)",
+            (f'-{Story.LIFETIME_HOURS} hours',)
+        )
+        db.commit()
+        return cur.rowcount
+
+    @staticmethod
+    def get_active_for_user(viewer_id):
+        """Активные истории сгруппированные по пользователям для rings-бара.
+        Возвращает список: {user_id, username, display_name, avatar, verified,
+                            stories: [{id, media, media_type, caption, created_at, seen}]}
+        """
+        db = get_db()
+        rows = db.execute(
+            f"""SELECT s.id, s.user_id, s.media, s.media_type, s.caption, s.created_at,
+                       u.username, u.display_name, u.avatar, u.verified
+                FROM stories s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.created_at >= datetime('now', '-{Story.LIFETIME_HOURS} hours')
+                ORDER BY s.user_id, s.created_at DESC""",
+        ).fetchall()
+        # Какие уже видел viewer
+        seen_ids = set()
+        if viewer_id:
+            sv = db.execute('SELECT story_id FROM story_views WHERE viewer_id = ?', (viewer_id,)).fetchall()
+            seen_ids = {r['story_id'] for r in sv}
+        # Группируем по пользователю
+        grouped = {}
+        order = []
+        for r in rows:
+            uid = r['user_id']
+            if uid not in grouped:
+                grouped[uid] = {
+                    'user_id': uid,
+                    'username': r['username'],
+                    'display_name': r['display_name'],
+                    'avatar': r['avatar'],
+                    'verified': r['verified'],
+                    'stories': [],
+                }
+                order.append(uid)
+            grouped[uid]['stories'].append({
+                'id': r['id'],
+                'media': r['media'],
+                'media_type': r['media_type'],
+                'caption': r['caption'],
+                'created_at': r['created_at'],
+                'seen': r['id'] in seen_ids,
+            })
+        return [grouped[uid] for uid in order]
+
+    @staticmethod
+    def get_user_stories(uid):
+        """Все активные истории конкретного пользователя (для просмотрщика)."""
+        db = get_db()
+        return db.execute(
+            f"""SELECT * FROM stories
+                WHERE user_id = ? AND created_at >= datetime('now', '-{Story.LIFETIME_HOURS} hours')
+                ORDER BY created_at ASC""",
+            (uid,)
+        ).fetchall()
+
+    @staticmethod
+    def delete(sid, uid, force=False):
+        db = get_db()
+        s = Story.get(sid)
+        if not s:
+            return False
+        if s['user_id'] != uid and not force:
+            return False
+        db.execute('DELETE FROM stories WHERE id = ?', (sid,))
+        db.commit()
+        return True
+
+
+class StoryView:
+    """Просмотры историй (один просмотр на пользователя)."""
+
+    @staticmethod
+    def record(story_id, viewer_id):
+        db = get_db()
+        try:
+            db.execute('INSERT OR IGNORE INTO story_views (story_id, viewer_id) VALUES (?, ?)',
+                       (story_id, viewer_id))
+            db.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def count(story_id):
+        db = get_db()
+        return db.execute('SELECT COUNT(*) c FROM story_views WHERE story_id = ?', (story_id,)).fetchone()['c']
+
+    @staticmethod
+    def viewers(story_id):
+        """Кто просмотрел историю (с инфой о пользователе)."""
+        db = get_db()
+        return db.execute(
+            """SELECT u.id, u.username, u.display_name, u.avatar, u.verified, sv.viewed_at
+               FROM story_views sv JOIN users u ON u.id = sv.viewer_id
+               WHERE sv.story_id = ? ORDER BY sv.viewed_at DESC""",
+            (story_id,)
+        ).fetchall()

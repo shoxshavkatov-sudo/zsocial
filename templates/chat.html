@@ -63,12 +63,25 @@
                     {% if m.sender_id == cu.id %}
                     <div class="msg-actions-bar">
                         <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
+                        {% if m.msg_type == 'text' %}
+                        <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
+                        <button onclick="editMsg({{ m.id }})" title="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"/></svg></button>
+                        {% endif %}
                         <button onclick="deleteMsg({{ m.id }})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>
                     </div>
                     {% else %}
                     <div class="msg-actions-bar">
                         <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
+                        {% if m.msg_type == 'text' %}
+                        <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
+                        {% endif %}
                     </div>
+                    {% endif %}
+                    {% if m.reply_to_content %}
+                        <div class="reply-quote">
+                            <svg class="icon icon-sm reply-icon"><use href="#i-reply"/></svg>
+                            <span class="reply-quote-text">{{ m.reply_to_username|default('') }}: {{ m.reply_to_content[:80] }}</span>
+                        </div>
                     {% endif %}
                     {% if m.msg_type == 'audio' %}
                         <div class="msg-bubble voice-msg">
@@ -92,7 +105,7 @@
                             <a href="{{ media_url(m.file_url) }}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
                         </div>
                     {% else %}
-                        <div class="msg-bubble">{{ m.content }}</div>
+                        <div class="msg-bubble msg-text-{{ m.id }}" data-original="{{ m.content|e }}">{{ m.content }}{% if m.edited_at %}<span class="msg-edited-label">ред.</span>{% endif %}</div>
                     {% endif %}
                     <div class="msg-time">
                         {{ m.created_at | time_ago }}

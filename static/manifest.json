@@ -1,0 +1,87 @@
+{
+    "name": "ZSocial",
+    "short_name": "ZSocial",
+    "description": "Социальная сеть нового поколения",
+    "start_url": "/feed",
+    "display": "standalone",
+    "background_color": "#0a0a0f",
+    "theme_color": "#6d5efc",
+    "orientation": "portrait-primary",
+    "scope": "/",
+    "lang": "ru",
+    "categories": ["social"],
+    "icons": [
+        {
+            "src": "/static/img/pwa/icon-72.png",
+            "sizes": "72x72",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-96.png",
+            "sizes": "96x96",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-128.png",
+            "sizes": "128x128",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-144.png",
+            "sizes": "144x144",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-152.png",
+            "sizes": "152x152",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/img/pwa/icon-384.png",
+            "sizes": "384x384",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/img/pwa/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/img/pwa/icon-512-maskable.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "Лента",
+            "short_name": "Лента",
+            "description": "Открыть ленту новостей",
+            "url": "/feed",
+            "icons": [{"src": "/static/img/pwa/icon-96.png", "sizes": "96x96"}]
+        },
+        {
+            "name": "Сообщения",
+            "short_name": "Чат",
+            "description": "Открыть сообщения",
+            "url": "/chat",
+            "icons": [{"src": "/static/img/pwa/icon-96.png", "sizes": "96x96"}]
+        },
+        {
+            "name": "Обзор",
+            "short_name": "Обзор",
+            "description": "Обзор контента",
+            "url": "/explore",
+            "icons": [{"src": "/static/img/pwa/icon-96.png", "sizes": "96x96"}]
+        }
+    ]
+}

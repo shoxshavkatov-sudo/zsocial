@@ -2,6 +2,10 @@
 {% block title %}Лента · {{ site_name }}{% endblock %}
 {% block body %}
 <div class="main-content">
+    {% if not tag %}
+    {% include '_stories.html' %}
+    {% endif %}
+
     <div class="page-header">
         <h1>{% if tag %}Хештег #{{ tag }}{% else %}Лента{% endif %}</h1>
         {% if tag %}<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="location.href='{{ url_for('feed') }}'">Сбросить</button>{% endif %}

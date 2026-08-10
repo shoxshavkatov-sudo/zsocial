@@ -282,3 +282,160 @@ class TestPagination:
         # Страница 1 и 2 должны возвращать 200
         assert client.get('/feed?page=1').status_code == 200
         assert client.get('/feed?page=2').status_code == 200
+
+
+# ==================== ИСТОРИИ (Stories) ====================
+
+class TestStories:
+    def test_create_story(self, app):
+        import io
+        client = auth_client(app, username='storyteller')
+        img = io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        img.name = 'story.png'
+        r = client.post('/story/create', data={
+            'media': (img, 'story.png'),
+            'caption': 'Test story',
+        }, content_type='multipart/form-data')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data.get('ok') or data.get('story_id') or data.get('id')
+
+    def test_story_appears_in_api(self, app):
+        import io
+        client = auth_client(app, username='storyteller2')
+        img = io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        img.name = 'story.png'
+        client.post('/story/create', data={
+            'media': (img, 'story.png'),
+            'caption': 'API story',
+        }, content_type='multipart/form-data')
+        r = client.get('/api/stories')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert 'groups' in data
+        assert isinstance(data['groups'], list)
+        assert len(data['groups']) >= 1
+
+    def test_delete_own_story(self, app):
+        import io
+        client = auth_client(app, username='storydeleter')
+        img = io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        img.name = 'story.png'
+        client.post('/story/create', data={
+            'media': (img, 'story.png'),
+            'caption': 'Delete me',
+        }, content_type='multipart/form-data')
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            sid = db.execute('SELECT MAX(id) id FROM stories').fetchone()['id']
+        r = client.post(f'/story/{sid}/delete')
+        assert r.status_code == 200
+
+
+# ==================== ОБЗОР (Explore) ====================
+
+class TestExplore:
+    def test_explore_page_loads(self, app):
+        client = auth_client(app, username='explorer')
+        r = client.get('/explore')
+        assert r.status_code == 200
+        assert b'explore-page' in r.data or 'Обзор' in r.data.decode()
+
+    def test_explore_shows_trending(self, app):
+        client = auth_client(app, username='trendposter')
+        client.post('/post/create', data={'content': 'Тренд #мастхи #код'})
+        r = client.get('/explore')
+        assert r.status_code == 200
+        html = r.data.decode()
+        assert 'мастхи' in html or 'код' in html
+
+    def test_explore_popular_posts(self, app):
+        client = auth_client(app, username='popposter')
+        client.post('/post/create', data={'content': 'Popular content'})
+        r = client.get('/explore')
+        assert r.status_code == 200
+
+
+# ==================== МЕССЕНДЖЕР: ОТВЕТ/РЕДАКТ ====================
+
+class TestMessengerAdvanced:
+    def test_reply_to_message(self, app):
+        c1 = auth_client(app, username='replier')
+        register(app.test_client(), username='replytarget')
+        with app.app_context():
+            from models import User
+            receiver = User.get_by_username('replytarget')
+            rid = receiver['id']
+        # Исходное сообщение
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Original msg'})
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            msg_id = db.execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        # Ответ
+        r = c1.post('/chat/send', data={
+            'receiver_id': rid, 'content': 'Reply text',
+            'reply_to_id': msg_id,
+        })
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data.get('reply_to_id') == msg_id
+
+    def test_edit_message(self, app):
+        c1 = auth_client(app, username='editor')
+        register(app.test_client(), username='editreceiver')
+        with app.app_context():
+            from models import User
+            receiver = User.get_by_username('editreceiver')
+            rid = receiver['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Original'})
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            msg_id = db.execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        r = c1.post(f'/chat/{msg_id}/edit', data={'content': 'Edited text'})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data.get('edited') is True
+        # Проверяем в БД
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            row = db.execute('SELECT content, edited_at FROM messages WHERE id=?', (msg_id,)).fetchone()
+            assert row['content'] == 'Edited text'
+            assert row['edited_at'] is not None
+
+    def test_mark_messages_read(self, app):
+        c1 = auth_client(app, username='reader1')
+        register(app.test_client(), username='reader2')
+        with app.app_context():
+            from models import User
+            sender = User.get_by_username('reader1')
+            receiver = User.get_by_username('reader2')
+            sid, rid = sender['id'], receiver['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Unread msg'})
+        # Читаем как получатель, передаём sender_id как partner
+        c2 = auth_client(app, username='reader2')
+        r = c2.post(f'/chat/{sid}/read')
+        assert r.status_code == 200
+        with app.app_context():
+            from models import get_db
+            db = get_db()
+            count = db.execute('SELECT COUNT(*) c FROM messages WHERE sender_id=? AND is_read=1', (sid,)).fetchone()['c']
+            assert count >= 1
+
+
+# ==================== PWA ====================
+
+class TestPWA:
+    def test_manifest_json(self, client):
+        r = client.get('/manifest.json')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data.get('name') or data.get('short_name')
+
+    def test_service_worker(self, client):
+        r = client.get('/sw.js')
+        assert r.status_code == 200
+        assert b'ServiceWorker' in r.data or b'serviceWorker' in r.data or b'cache' in r.data

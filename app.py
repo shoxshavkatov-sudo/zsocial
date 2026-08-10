@@ -8,7 +8,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, jsonify, send_from_directory
 )
-from flask_socketio import SocketIO, emit, join_room
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -20,7 +20,7 @@ from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     is_online,
     User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings,
-    GroupMessage, VoiceRoom
+    GroupMessage, VoiceRoom, Story, StoryView
 )
 import mailer
 
@@ -80,6 +80,25 @@ def serve_upload(filename):
     пользовательских файлов строит URL сюда.
     """
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Service Worker в корне домена, чтобы его scope был '/'."""
+    resp = send_from_directory(app.static_folder, 'sw.js')
+    resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+
+
+@app.route('/manifest.json')
+def web_manifest():
+    """manifest.json в корне для соответствия PWA-спецификации."""
+    resp = send_from_directory(app.static_folder, 'manifest.json')
+    resp.headers['Content-Type'] = 'application/manifest+json; charset=utf-8'
+    resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    return resp
 
 # Версия приложения — для cache-busting статики.
 # В продакшене берём хэш коммита из env. Локально — mtime style.css/main.js,
@@ -396,6 +415,7 @@ def logout():
 @app.route('/feed')
 @login_required
 def feed():
+    Story.cleanup_expired()  # чистка истёкших историй
     tab = request.args.get('tab', 'all')
     tag = request.args.get('tag', '').strip()
     page = max(1, request.args.get('page', 1, type=int))
@@ -408,8 +428,31 @@ def feed():
     saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
     trending = Post.get_trending_tags(10)
     pages = (total + per_page - 1) // per_page
+    story_groups = Story.get_active_for_user(session['user_id'])
     return render_template('feed.html', posts=posts, liked_posts=liked, saved_posts=saved_ids,
                            tab=tab, tag=tag, trending=trending,
+                           page=page, pages=pages, per_page=per_page,
+                           story_groups=story_groups)
+
+
+@app.route('/explore')
+@login_required
+def explore():
+    """Страница обзора: популярные посты, тренды, рекомендации пользователей и групп."""
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = 12
+    popular_posts, total = Post.get_popular(page=page, per_page=per_page)
+    liked = {p['id'] for p in popular_posts if Like.is_liked(session['user_id'], p['id'])}
+    saved_ids = {b['id'] for b in Bookmark.get_by_user(session['user_id'])}
+    trending = Post.get_trending_tags(15)
+    suggested_users = User.get_suggested(session['user_id'], limit=8)
+    popular_groups = Group.get_popular(limit=6)
+    pages = (total + per_page - 1) // per_page
+    return render_template('explore.html',
+                           posts=popular_posts, liked_posts=liked, saved_posts=saved_ids,
+                           trending=trending,
+                           suggested_users=suggested_users,
+                           popular_groups=popular_groups,
                            page=page, pages=pages, per_page=per_page)
 
 
@@ -919,8 +962,10 @@ def send_message():
     if not content and not file_url:
         return jsonify({'error': 'Пусто'}), 400
 
+    reply_to_id = request.form.get('reply_to_id', type=int) or None
     msg = Message.create(u['id'], rid, content, msg_type=msg_type,
-                         file_url=file_url, file_name=file_name, file_size=file_size, duration=duration)
+                         file_url=file_url, file_name=file_name, file_size=file_size, duration=duration,
+                         reply_to_id=reply_to_id)
     data = {
         'id': msg['id'], 'content': msg['content'], 'msg_type': msg['msg_type'],
         'file_url': msg['file_url'], 'file_name': msg['file_name'],
@@ -929,7 +974,16 @@ def send_message():
         'time': time_ago(msg['created_at']),
         'sender_username': u['username'], 'sender_avatar': u['avatar'],
         'file_url_full': (_media_for(msg['file_url']) if msg['file_url'] else None),
+        'reply_to_id': msg['reply_to_id'] if 'reply_to_id' in msg.keys() else None,
+        'reply_to_content': None,
+        'is_read': msg['is_read'] if 'is_read' in msg.keys() else 0,
+        'edited_at': msg['edited_at'] if 'edited_at' in msg.keys() else None,
     }
+    # Добавляем текст ответа для превью
+    if data['reply_to_id']:
+        rm = Message.get(data['reply_to_id'])
+        if rm:
+            data['reply_to_content'] = rm['content'][:80]
     socketio.emit('new_message', data, room=f'user_{rid}')
     socketio.emit('new_message', data, room=f'user_{u["id"]}')
     return jsonify(data)
@@ -947,6 +1001,34 @@ def delete_message(mid):
         return jsonify({'error': 'Нет прав'}), 403
     socketio.emit('message_deleted', {'id': mid}, room=f'user_{receiver}')
     socketio.emit('message_deleted', {'id': mid}, room=f'user_{sender}')
+    return jsonify({'ok': True})
+
+
+@app.route('/chat/<int:mid>/edit', methods=['POST'])
+@login_required
+@limiter.limit("20/minute")
+def edit_message(mid):
+    """Редактирование сообщения (только текст, в течение 15 минут)."""
+    content = request.form.get('content', '').strip()
+    if not content:
+        return jsonify({'error': 'Пусто'}), 400
+    m = Message.get(mid)
+    if not m:
+        return jsonify({'error': 'Не найдено'}), 404
+    if not Message.edit(mid, session['user_id'], content):
+        return jsonify({'error': 'Нельзя редактировать (прошло >15 мин или нет прав)'}), 403
+    data = {'id': mid, 'content': content, 'edited': True}
+    socketio.emit('message_edited', data, room=f'user_{m["receiver_id"]}')
+    socketio.emit('message_edited', data, room=f'user_{m["sender_id"]}')
+    return jsonify(data)
+
+
+@app.route('/chat/<int:partner_id>/read', methods=['POST'])
+@login_required
+def mark_chat_read(partner_id):
+    """Отметить переписку с partner_id как прочитанную."""
+    Message.mark_read(partner_id, session['user_id'])
+    socketio.emit('messages_read', {'reader_id': session['user_id']}, room=f'user_{partner_id}')
     return jsonify({'ok': True})
 
 
@@ -1275,6 +1357,84 @@ def handle_call_reject(data):
     to = _call_peer(data)
     if to:
         emit('call_reject', {'from': session['user_id']}, room=f'user_{to}')
+
+
+# ==================== ИСТОРИИ (Stories) ====================
+
+@app.route('/story/create', methods=['POST'])
+@login_required
+@limiter.limit("20/hour")
+def create_story():
+    """Создать историю (фото или видео)."""
+    file = request.files.get('media')
+    caption = request.form.get('caption', '').strip()[:300]
+    if not file or not file.filename:
+        return jsonify({'error': 'Выберите фото или видео'}), 400
+    media_type = 'image' if file.content_type and file.content_type.startswith('image/') else 'video'
+    media_path = save_file(file, 'story')
+    if not media_path:
+        return jsonify({'error': 'Неподдерживаемый формат'}), 400
+    story = Story.create(session['user_id'], media_path, media_type, caption or None)
+    return jsonify({'ok': True, 'id': story['id'], 'media': media_path, 'media_type': media_type})
+
+
+@app.route('/api/stories')
+@login_required
+def api_stories():
+    """JSON: активные истории (для кольца в ленте)."""
+    Story.cleanup_expired()
+    groups = Story.get_active_for_user(session['user_id'])
+    # Добавляем свою историю первым (если есть)
+    my_stories = Story.get_user_stories(session['user_id'])
+    if my_stories and (not groups or groups[0]['user_id'] != session['user_id']):
+        me = current_user()
+        stories_list = []
+        for st in my_stories:
+            stories_list.append({
+                'id': st['id'], 'media': st['media'], 'media_type': st['media_type'],
+                'caption': st['caption'], 'created_at': st['created_at'], 'seen': True,
+            })
+        groups.insert(0, {
+            'user_id': session['user_id'],
+            'username': me['username'],
+            'display_name': me['display_name'],
+            'avatar': me['avatar'],
+            'verified': me['verified'] if 'verified' in me.keys() else 0,
+            'stories': stories_list,
+        })
+    return jsonify({'groups': groups})
+
+
+@app.route('/story/<int:sid>/view', methods=['POST'])
+@login_required
+def view_story(sid):
+    """Отметить историю как просмотренную."""
+    StoryView.record(sid, session['user_id'])
+    count = StoryView.count(sid)
+    return jsonify({'ok': True, 'views': count})
+
+
+@app.route('/story/<int:sid>/delete', methods=['POST'])
+@login_required
+def delete_story(sid):
+    """Удалить свою историю."""
+    if Story.delete(sid, session['user_id']):
+        return jsonify({'ok': True})
+    return jsonify({'error': 'Не найдена'}), 404
+
+
+@app.route('/story/<int:sid>/viewers')
+@login_required
+def story_viewers(sid):
+    """Список просмотревших."""
+    s = Story.get(sid)
+    if not s:
+        return jsonify({'error': 'Не найдена'}), 404
+    return jsonify({'viewers': [
+        {'id': v['id'], 'username': v['username'], 'display_name': v['display_name'],
+         'avatar': v['avatar'], 'verified': v['verified']}
+        for v in StoryView.viewers(sid)
+    ]})
 
 
 # ==================== 404 ====================

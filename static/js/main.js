@@ -452,6 +452,17 @@ function initSocket(myId, partnerId) {
     chatSocket = io();
 
     chatSocket.on('new_message', (data) => {
+        // Локальное уведомление если сообщение от другого диалога или вкладка в фоне
+        if (window.ZSNotifications && data.sender_id !== myId) {
+            const isCurrentChat = (data.sender_id === partnerId || data.receiver_id === partnerId);
+            if (!isCurrentChat || document.hidden) {
+                window.ZSNotifications.show(
+                    data.sender_username || 'ZSocial',
+                    data.content || 'Новое сообщение',
+                    '/chat/' + data.sender_id
+                );
+            }
+        }
         if (data.sender_id !== partnerId && data.receiver_id !== partnerId) return;
         const container = document.getElementById('chat-messages');
         if (!container) return;
@@ -469,6 +480,24 @@ function initSocket(myId, partnerId) {
     chatSocket.on('message_deleted', (d) => {
         const el = document.getElementById('msg-' + d.id);
         if (el) el.remove();
+    });
+
+    // Редактирование сообщения
+    chatSocket.on('message_edited', (d) => {
+        const bubble = document.querySelector('.msg-text-' + d.id);
+        if (bubble) bubble.innerHTML = esc(d.content) + '<span class="msg-edited-label">ред.</span>';
+    });
+
+    // Отчёты о прочтении (✓ → ✓✓ синие)
+    chatSocket.on('messages_read', (d) => {
+        if (d.reader_id !== partnerId) return;
+        document.querySelectorAll('.msg.mine .msg-check.unread').forEach(el => {
+            el.classList.remove('unread');
+            el.classList.add('read');
+            if (el.querySelectorAll('svg').length < 2) {
+                el.insertAdjacentHTML('beforeend', '<svg class="icon" style="margin-left:-8px"><use href="#i-check"/></svg>');
+            }
+        });
     });
 
     // Реакции
@@ -535,6 +564,11 @@ function renderReactions(mid, reactions) {
 
 function renderMessageHTML(data, isMine) {
     const t = data.msg_type || 'text';
+    // Reply quote
+    let replyHTML = '';
+    if (data.reply_to_content) {
+        replyHTML = `<div class="reply-quote"><svg class="icon icon-sm reply-icon"><use href="#i-reply"/></svg><span class="reply-quote-text">${esc(data.reply_to_content)}</span></div>`;
+    }
     let inner = '';
     if (t === 'audio' && data.file_url_full) {
         inner = `<div class="msg-bubble voice-msg">
@@ -554,16 +588,27 @@ function renderMessageHTML(data, isMine) {
             <a href="${data.file_url_full}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
         </div>`;
     } else {
-        inner = `<div class="msg-bubble">${esc(data.content)}</div>`;
+        const edited = data.edited_at ? '<span class="msg-edited-label">ред.</span>' : '';
+        inner = `<div class="msg-bubble msg-text-${data.id}" data-original="${esc(data.content)}">${esc(data.content)}${edited}</div>`;
     }
-    return inner + `<div class="msg-time">${data.time}</div>`;
+    // Read check for mine
+    const checkHTML = isMine ? `<span class="msg-check ${data.is_read ? 'read' : 'unread'}"><svg class="icon"><use href="#i-check"/></svg><svg class="icon"><use href="#i-check"/></svg></span>` : '';
+    return replyHTML + inner + `<div class="msg-time">${data.time} ${checkHTML}</div>`;
 }
 
 function appendMessage(container, data, myId) {
     const isMine = data.sender_id === myId;
     const div = document.createElement('div');
     div.className = 'msg ' + (isMine ? 'mine' : 'theirs');
-    div.innerHTML = renderMessageHTML(data, isMine);
+    div.id = 'msg-' + data.id;
+    // Actions bar: reply always, edit only for text + mine, delete only mine
+    const isText = (data.msg_type || 'text') === 'text';
+    let actions = `<div class="msg-actions-bar">
+        <button onclick="replyToMsg(${data.id})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>`;
+    if (isMine && isText) actions += `<button onclick="editMsg(${data.id})" title="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"/></svg></button>`;
+    if (isMine) actions += `<button onclick="deleteMsg(${data.id})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>`;
+    actions += '</div>';
+    div.innerHTML = actions + renderMessageHTML(data, isMine);
     container.appendChild(div);
 }
 
@@ -579,9 +624,91 @@ function sendMessage(partnerId) {
     const fd = new FormData();
     fd.append('receiver_id', partnerId);
     fd.append('content', txt);
+    // Поддержка ответа на сообщение
+    if (window._replyTo) {
+        fd.append('reply_to_id', window._replyTo);
+    }
     fetch('/chat/send', { method: 'POST', body: fd })
         .then(r => r.json())
-        .then(d => { if (!d.error) inp.value = ''; });
+        .then(d => {
+            if (!d.error) { inp.value = ''; cancelReply(); }
+        });
+}
+
+// ===== ОТВЕТ НА СООБЩЕНИЕ =====
+function replyToMsg(mid) {
+    const msg = document.getElementById('msg-' + mid);
+    if (!msg) return;
+    window._replyTo = mid;
+    const bubble = msg.querySelector('.msg-bubble');
+    const text = bubble ? bubble.textContent.trim() : 'Сообщение';
+    let area = document.getElementById('chat-reply-preview');
+    if (!area) {
+        area = document.createElement('div');
+        area.id = 'chat-reply-preview';
+        area.className = 'chat-reply-preview';
+        const inputArea = document.querySelector('.chat-input-area');
+        if (inputArea) inputArea.parentNode.insertBefore(area, inputArea);
+    }
+    area.innerHTML = `<div class="reply-preview-inner">
+        <svg class="icon reply-icon"><use href="#i-reply"/></svg>
+        <div class="reply-preview-text">${esc(text.slice(0,80))}</div>
+        <button class="reply-cancel" onclick="cancelReply()"><svg class="icon icon-sm"><use href="#i-x"/></svg></button>
+    </div>`;
+    area.style.display = '';
+    document.getElementById('chat-input').focus();
+}
+
+function cancelReply() {
+    window._replyTo = null;
+    const area = document.getElementById('chat-reply-preview');
+    if (area) area.style.display = 'none';
+}
+
+// ===== РЕДАКТИРОВАНИЕ СООБЩЕНИЯ =====
+function editMsg(mid) {
+    const bubble = document.querySelector('.msg-text-' + mid);
+    if (!bubble) return;
+    const original = bubble.getAttribute('data-original') || bubble.textContent;
+    const isMine = bubble.closest('.msg').classList.contains('mine');
+    bubble.innerHTML = `<div class="edit-msg-wrap">
+        <textarea class="edit-msg-input" rows="1">${esc(original)}</textarea>
+        <div class="edit-msg-actions">
+            <button class="btn btn-ghost btn-sm" onclick="cancelEditMsg(${mid}, '${original.replace(/'/g,"\\'")}')">Отмена</button>
+            <button class="btn btn-primary btn-sm" onclick="saveEditMsg(${mid})">Сохранить</button>
+        </div>
+    </div>`;
+    const ta = bubble.querySelector('.edit-msg-input');
+    ta.focus();
+    ta.style.height = ta.scrollHeight + 'px';
+    ta.addEventListener('input', () => { ta.style.height = ta.scrollHeight + 'px'; });
+    ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEditMsg(mid); }
+        if (e.key === 'Escape') cancelEditMsg(mid, original);
+    });
+}
+
+function saveEditMsg(mid) {
+    const bubble = document.querySelector('.msg-text-' + mid);
+    if (!bubble) return;
+    const ta = bubble.querySelector('.edit-msg-input');
+    if (!ta) return;
+    const content = ta.value.trim();
+    if (!content) return;
+    const fd = new FormData();
+    fd.append('content', content);
+    fetch('/chat/' + mid + '/edit', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) { flashToast(d.error); return; }
+            // Успешно — bubble обновится через socket event message_edited
+        });
+}
+
+function cancelEditMsg(mid, original) {
+    const bubble = document.querySelector('.msg-text-' + mid);
+    if (!bubble) return;
+    bubble.innerHTML = esc(original) + '<span class="msg-edited-label">ред.</span>';
 }
 
 // ===== ОТПРАВКА ФАЙЛОВ =====
@@ -1710,6 +1837,8 @@ function _removeVoiceParticipantEl(userId) {
             setTimeout(() => {
                 try { window.initSocket(Number(uid), Number(partnerId)); } catch (e) { console.warn(e); }
                 if (window._registerCallListeners) window._registerCallListeners();
+                // Отметить сообщения как прочитанные
+                fetch('/chat/' + partnerId + '/read', { method: 'POST' });
             }, 80);
         }
         // Скролл вниз + скрытие баров на мобиле
@@ -1720,4 +1849,394 @@ function _removeVoiceParticipantEl(userId) {
         }
     };
 })();
+
+/* ==================== ИСТОРИИ (Stories) ==================== */
+(function () {
+    var storyData = window.__STORY_DATA__ || []; // [{user_id, stories:[{id,media,media_type,caption,seen}]}]
+    var viewerState = {
+        open: false,
+        groupIdx: 0,
+        storyIdx: 0,
+        groups: [],
+        timer: null,
+        touchStartX: 0,
+        pendingFile: null,
+    };
+    var STORY_DURATION = 5000; // мс на один слайд
+
+    // ---- Создание истории ----
+    window.openStoryCreator = function () {
+        document.getElementById('story-creator-modal').style.display = 'flex';
+        document.getElementById('story-preview-img').style.display = 'none';
+        document.getElementById('story-preview-vid').style.display = 'none';
+        document.getElementById('story-preview-placeholder').style.display = '';
+        document.getElementById('story-caption-input').value = '';
+        document.getElementById('story-publish-btn').disabled = true;
+        viewerState.pendingFile = null;
+    };
+
+    window.closeStoryCreator = function () {
+        document.getElementById('story-creator-modal').style.display = 'none';
+        viewerState.pendingFile = null;
+    };
+
+    window.handleStoryFile = function (input) {
+        var file = input.files && input.files[0];
+        if (!file) return;
+        viewerState.pendingFile = file;
+        var imgEl = document.getElementById('story-preview-img');
+        var vidEl = document.getElementById('story-preview-vid');
+        var ph = document.getElementById('story-preview-placeholder');
+        if (file.type.startsWith('image/')) {
+            var r = new FileReader();
+            r.onload = function (e) {
+                imgEl.src = e.target.result; imgEl.style.display = ''; vidEl.style.display = 'none'; ph.style.display = 'none';
+            };
+            r.readAsDataURL(file);
+        } else if (file.type.startsWith('video/')) {
+            var url = URL.createObjectURL(file);
+            vidEl.src = url; vidEl.style.display = ''; imgEl.style.display = 'none'; ph.style.display = 'none';
+        }
+        document.getElementById('story-publish-btn').disabled = false;
+    };
+
+    window.publishStory = function () {
+        if (!viewerState.pendingFile) return;
+        var fd = new FormData();
+        fd.append('media', viewerState.pendingFile);
+        fd.append('caption', document.getElementById('story-caption-input').value.trim());
+        document.getElementById('story-publish-btn').disabled = true;
+        document.getElementById('story-publish-btn').textContent = '...';
+        fetch('/story/create', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                closeStoryCreator();
+                if (d.ok) flashToast('История опубликована!');
+                else flashToast(d.error || 'Ошибка');
+            })
+            .catch(function () { flashToast('Ошибка загрузки'); });
+        document.getElementById('story-publish-btn').textContent = 'Опубликовать';
+    };
+
+    // ---- Просмотрщик ----
+    window.openStoryViewer = function (userId) {
+        var groups = [];
+        for (var i = 0; i < storyData.length; i++) {
+            if (storyData[i].user_id === userId) {
+                groups = storyData.slice(i).concat(storyData.slice(0, i));
+                break;
+            }
+        }
+        if (!groups.length) return;
+        viewerState.groups = groups;
+        viewerState.groupIdx = 0;
+        viewerState.storyIdx = 0;
+        viewerState.open = true;
+        var el = document.getElementById('story-viewer');
+        el.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        _renderStory();
+    };
+
+    window.closeStoryViewer = function () {
+        viewerState.open = false;
+        viewerState.timer && clearInterval(viewerState.timer);
+        document.getElementById('story-viewer').style.display = 'none';
+        document.getElementById('story-viewers-list').style.display = 'none';
+        document.body.style.overflow = '';
+        var vid = document.getElementById('sv-media-vid');
+        vid.pause(); vid.src = '';
+    };
+
+    function _currentStory() {
+        var g = viewerState.groups[viewerState.groupIdx];
+        return g && g.stories[viewerState.storyIdx];
+    }
+
+    function _renderStory() {
+        viewerState.timer && clearInterval(viewerState.timer);
+        var g = viewerState.groups[viewerState.groupIdx];
+        if (!g) { closeStoryViewer(); return; }
+        var s = _currentStory();
+        if (!s) {
+            // следующая группа
+            if (viewerState.groupIdx < viewerState.groups.length - 1) {
+                viewerState.groupIdx++; viewerState.storyIdx = 0; _renderStory(); return;
+            } else { closeStoryViewer(); return; }
+        }
+
+        // Прогресс-бары
+        var barsHtml = '';
+        for (var i = 0; i < g.stories.length; i++) {
+            var cls = 'story-progress-bar';
+            if (i < viewerState.storyIdx) cls += ' done';
+            else if (i === viewerState.storyIdx) cls += ' active';
+            barsHtml += '<div class="' + cls + '"><div class="story-progress-fill" id="spf-' + i + '"></div></div>';
+        }
+        document.getElementById('story-progress-bars').innerHTML = barsHtml;
+
+        // Заголовок
+        var uh = document.getElementById('story-viewer-user');
+        uh.querySelector('img').src = _mediaUrl(g.avatar);
+        uh.querySelector('.story-viewer-name').textContent = g.display_name || g.username;
+        uh.querySelector('.story-viewer-time').textContent = _timeAgo(s.created_at);
+
+        // Медиа
+        var img = document.getElementById('sv-media-img');
+        var vid = document.getElementById('sv-media-vid');
+        var cap = document.getElementById('sv-caption');
+        img.style.display = 'none'; vid.style.display = 'none'; cap.style.display = 'none';
+
+        if (s.media_type === 'video') {
+            vid.src = _mediaUrl(s.media); vid.style.display = ''; vid.play();
+        } else {
+            img.src = _mediaUrl(s.media); img.style.display = '';
+        }
+        if (s.caption) { cap.textContent = s.caption; cap.style.display = ''; }
+
+        // Навигация
+        document.querySelector('.sv-prev').style.display = (viewerState.storyIdx > 0 || viewerState.groupIdx > 0) ? '' : 'none';
+        document.querySelector('.sv-next').style.display = '' ; // всегда можно перейти вперёд
+
+        // Автопрогресс
+        var elapsed = 0;
+        var bar = document.getElementById('spf-' + viewerState.storyIdx);
+        var dur = s.media_type === 'video' ? 15000 : STORY_DURATION; // видео дольше
+        viewerState.timer = setInterval(function () {
+            elapsed += 100;
+            if (bar) bar.style.width = Math.min(100, (elapsed / dur) * 100) + '%';
+            if (elapsed >= dur) { navigateStory(1); }
+        }, 100);
+
+        // Отметить просмотр
+        if (!s.seen) {
+            fetch('/story/' + s.id + '/view', { method: 'POST' }).catch(function () {});
+            s.seen = true;
+        }
+    }
+
+    window.navigateStory = function (dir) {
+        viewerState.timer && clearInterval(viewerState.timer);
+        var g = viewerState.groups[viewerState.groupIdx];
+        if (!g) { closeStoryViewer(); return; }
+        var ni = viewerState.storyIdx + dir;
+        if (ni >= g.stories.length) {
+            // Следующая группа
+            if (viewerState.groupIdx < viewerState.groups.length - 1) {
+                viewerState.groupIdx++; viewerState.storyIdx = 0;
+            } else { closeStoryViewer(); return; }
+        } else if (ni < 0) {
+            // Предыдущая группа
+            if (viewerState.groupIdx > 0) {
+                viewerState.groupIdx--; viewerState.storyIdx = viewerState.groups[viewerState.groupIdx].stories.length - 1;
+            } else { return; }
+        } else {
+            viewerState.storyIdx = ni;
+        }
+        _renderStory();
+    };
+
+    window.storyViewerClick = function (e) {
+        var x = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        var w = window.innerWidth;
+        if (x < w * 0.35) navigateStory(-1);
+        else if (x > w * 0.65) navigateStory(1);
+    };
+
+    window.storyTouchStart = function (e) {
+        viewerState.touchStartX = e.touches[0].clientX;
+    };
+    window.storyTouchEnd = function (e) {
+        var dx = e.changedTouches[0].clientX - viewerState.touchStartX;
+        if (Math.abs(dx) > 50) navigateStory(dx < 0 ? 1 : -1);
+    };
+
+    window.showStoryViewers = function () {
+        var s = _currentStory();
+        if (!s) return;
+        fetch('/story/' + s.id + '/viewers').then(function (r) { return r.json(); }).then(function (d) {
+            var el = document.getElementById('story-viewers-list');
+            var inner = document.getElementById('story-viewers-inner');
+            if (!d.viewers || !d.viewers.length) {
+                inner.innerHTML = '<div style="color:rgba(255,255,255,.5);font-size:13px;text-align:center">Пока нет просмотров</div>';
+            } else {
+                inner.innerHTML = d.viewers.map(function (v) {
+                    return '<div class="sv-item"><img src="' + _mediaUrl(v.avatar) + '">' +
+                        '<div><div class="sv-item-name">' + esc(v.display_name || v.username) + '</div></div></div>';
+                }).join('');
+            }
+            el.style.display = '';
+        }).catch(function () {});
+    };
+
+    // Helper: media URL (определяем серверный путь)
+    function _mediaUrl(path) {
+        if (!path) return '/static/img/default_avatar.svg';
+        if (path.startsWith('img/') || path.startsWith('css/') || path.startsWith('js/'))
+            return '/' + path;
+        return '/' + path;
+    }
+
+    function _timeAgo(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr + 'Z');
+        var s = Math.floor((Date.now() - d.getTime()) / 1000);
+        if (s < 60) return 'сейчас';
+        if (s < 3600) return Math.floor(s / 60) + ' ч';
+        if (s < 86400) return Math.floor(s / 3600) + ' ч';
+        return Math.floor(s / 86400) + ' д';
+    }
+
+    // Клавиатура
+    document.addEventListener('keydown', function (e) {
+        if (!viewerState.open) return;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigateStory(1); }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navigateStory(-1); }
+        if (e.key === 'Escape') closeStoryViewer();
+    });
+
+    // Закрытие по клику вне модала
+    var scModal = document.getElementById('story-creator-modal');
+    if (scModal) scModal.addEventListener('click', function (e) { if (e.target === scModal) closeStoryCreator(); });
+})();
+
+// ===== PWA: Service Worker + Локальные уведомления =====
+(function () {
+    'use strict';
+
+    // Регистрация Service Worker (только на проде/https или localhost)
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js?v=' + (window.APP_VERSION || 1))
+                .then(function (reg) {
+                    // console.log('[PWA] SW зарегистрирован', reg.scope);
+                    // Обновление при новом SW
+                    reg.addEventListener('updatefound', function () {
+                        var nw = reg.installing;
+                        if (!nw) return;
+                        nw.addEventListener('statechange', function () {
+                            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                                // Новая версия доступна — можно показать тост
+                                if (window.flashToast) {
+                                    window.flashToast('Обновление готово. Перезагрузите страницу.');
+                                }
+                            }
+                        });
+                    });
+                })
+                .catch(function (err) {
+                    console.warn('[PWA] Ошибка регистрации SW:', err);
+                });
+        });
+    }
+
+    // ===== Локальные уведомления через Notifications API =====
+    // Показываем нотификацию когда вкладка в фоне и пришло Socket.IO событие.
+    // Запрашиваем разрешение только после взаимодействия пользователя.
+    window.ZSNotifications = {
+        permission: function () {
+            if (!('Notification' in window)) return 'unsupported';
+            return Notification.permission;
+        },
+        request: function () {
+            if (!('Notification' in window)) return Promise.resolve('unsupported');
+            if (Notification.permission === 'default') {
+                return Notification.requestPermission();
+            }
+            return Promise.resolve(Notification.permission);
+        },
+        show: function (title, body, url) {
+            if (!('Notification' in window)) return;
+            if (Notification.permission !== 'granted') return;
+            // Не показываем если вкладка активна и не в фоне — пользователь и так видит
+            if (!document.hidden && document.hasFocus()) return;
+            try {
+                var n = new Notification(title, {
+                    body: body,
+                    icon: '/static/img/pwa/icon-192.png',
+                    badge: '/static/img/pwa/icon-96.png',
+                    tag: 'zsocial',
+                    renotify: true,
+                    data: { url: url || '/feed' }
+                });
+                n.onclick = function () {
+                    window.focus();
+                    if (url) window.location.href = url;
+                    n.close();
+                };
+                // Авто-закрытие через 6 секунд
+                setTimeout(function () { try { n.close(); } catch (e) {} }, 6000);
+            } catch (e) {
+                // ServiceWorkerRegistration.showNotification как fallback
+                if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+                    navigator.serviceWorker.ready.then(function (reg) {
+                        reg.showNotification(title, {
+                            body: body,
+                            icon: '/static/img/pwa/icon-192.png',
+                            badge: '/static/img/pwa/icon-96.png',
+                            tag: 'zsocial',
+                            data: { url: url || '/feed' }
+                        });
+                    });
+                }
+            }
+        }
+    };
+
+    // Просим разрешение при первом клике (некоторые браузеры требуют жест пользователя)
+    var _notifRequested = false;
+    function requestOnce() {
+        if (_notifRequested) return;
+        _notifRequested = true;
+        if (window.ZSNotifications && window.ZSNotifications.permission() === 'default') {
+            window.ZSNotifications.request();
+        }
+        document.removeEventListener('click', requestOnce);
+    }
+    document.addEventListener('click', requestOnce);
+
+    // Глобальная функция для кнопки в настройках
+    window.enablePushNotifs = function () {
+        if (!window.ZSNotifications || window.ZSNotifications.permission() === 'unsupported') {
+            window.flashToast && window.flashToast('Браузер не поддерживает уведомления');
+            return;
+        }
+        window.ZSNotifications.request().then(function (perm) {
+            var btn = document.getElementById('enable-push-btn');
+            if (perm === 'granted') {
+                if (btn) { btn.textContent = 'Включено ✓'; btn.disabled = true; btn.classList.add('btn-primary'); }
+                window.flashToast && window.flashToast('Push-уведомления включены');
+                window.ZSNotifications.show('ZSocial', 'Уведомления включены!', '/feed');
+            } else if (perm === 'denied') {
+                if (btn) { btn.textContent = 'Заблокировано'; btn.disabled = true; }
+                window.flashToast && window.flashToast('Уведомления заблокированы в настройках браузера');
+            }
+        });
+    };
+
+    // При загрузке страницы настроек — обновить состояние кнопки
+    function syncPushBtn() {
+        var btn = document.getElementById('enable-push-btn');
+        if (!btn || !window.ZSNotifications) return;
+        var p = window.ZSNotifications.permission();
+        if (p === 'granted') { btn.textContent = 'Включено ✓'; btn.disabled = true; btn.classList.add('btn-primary'); }
+        else if (p === 'denied') { btn.textContent = 'Заблокировано'; btn.disabled = true; }
+        else if (p === 'unsupported') { btn.textContent = 'Не поддерживается'; btn.disabled = true; }
+    }
+    document.addEventListener('DOMContentLoaded', syncPushBtn);
+})();
+
+// Перехват сообщений от SW (например, SPA_NAVIGATE при клике на push-уведомление)
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (event) {
+        if (event.data && event.data.type === 'SPA_NAVIGATE' && event.data.url) {
+            // Используем SPA-навигацию если доступна
+            var link = document.createElement('a');
+            link.href = event.data.url;
+            if (link.click) link.click();
+            else window.location.href = event.data.url;
+        }
+    });
+}
+
 

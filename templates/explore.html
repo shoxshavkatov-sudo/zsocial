@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Обзор · ZSocial{% endblock %}
+
+{% block body %}
+<div class="explore-page">
+
+    {# ===== Заголовок + поиск ===== #}
+    <div class="explore-header">
+        <h1 class="page-title">
+            <svg class="icon"><use href="#i-compass"/></svg>
+            Обзор
+        </h1>
+        <p class="page-subtitle">Откройте популярное, тренды и новые сообщества</p>
+        <form class="explore-search" action="{{ url_for('people') }}" method="GET">
+            <svg class="icon"><use href="#i-search"/></svg>
+            <input type="text" name="q" placeholder="Поиск постов, людей, групп, #хештегов..." autocomplete="off">
+            <button type="submit" class="btn btn-primary btn-sm">Найти</button>
+        </form>
+    </div>
+
+    {# ===== Тренды ===== #}
+    {% if trending %}
+    <section class="explore-section">
+        <h2 class="explore-section-title">
+            <svg class="icon icon-sm"><use href="#i-compass"/></svg>
+            Актуальные темы
+        </h2>
+        <div class="explore-tags">
+            {% for tag, count in trending %}
+            <a href="{{ url_for('feed', tag=tag) }}" class="explore-tag">
+                <span class="explore-tag-hash">#</span>
+                <span class="explore-tag-name">{{ tag }}</span>
+                <span class="explore-tag-count">{{ count }} {{ 'пост' if count == 1 else 'постов' }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ===== Рекомендации пользователей ===== #}
+    {% if suggested_users %}
+    <section class="explore-section">
+        <h2 class="explore-section-title">
+            <svg class="icon icon-sm"><use href="#i-users"/></svg>
+            Рекомендации
+        </h2>
+        <div class="explore-suggest-grid">
+            {% for u in suggested_users %}
+            <div class="suggest-card" onclick="location.href='{{ url_for('profile', username=u.username) }}'">
+                <img src="{{ media_url(u.avatar) }}" class="suggest-avatar" loading="lazy">
+                <div class="suggest-info">
+                    <div class="suggest-name">
+                        {{ u.display_name or u.username }}
+                        {% if u.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}
+                    </div>
+                    <div class="suggest-handle">@{{ u.username }}</div>
+                    <div class="suggest-stats">
+                        <span>{{ u.follower_count }} подп.</span>
+                        <span>·</span>
+                        <span>{{ u.post_count }} постов</span>
+                    </div>
+                </div>
+                {% if not u.is_following %}
+                <button class="btn btn-primary btn-sm suggest-follow-btn"
+                        onclick="event.stopPropagation(); toggleFollowFromList({{ u.id }}, this)">
+                    Подписаться
+                </button>
+                {% else %}
+                <button class="btn btn-sm suggest-follow-btn" disabled>Вы подписаны</button>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ===== Популярные группы ===== #}
+    {% if popular_groups %}
+    <section class="explore-section">
+        <h2 class="explore-section-title">
+            <svg class="icon icon-sm"><use href="#i-users"/></svg>
+            Популярные сообщества
+        </h2>
+        <div class="explore-groups-grid">
+            {% for g in popular_groups %}
+            <a href="{{ url_for('group_page', slug=g.slug) }}" class="group-card">
+                {% if g.cover %}<img src="{{ media_url(g.cover) }}" class="group-cover" loading="lazy">{% endif %}
+                <div class="group-card-body">
+                    <img src="{{ media_url(g.avatar) }}" class="group-avatar-sm" loading="lazy">
+                    <div class="group-name">{{ g.name }}</div>
+                    {% if g.description %}<div class="group-desc">{{ g.description[:80] }}{% if g.description|length > 80 %}…{% endif %}</div>{% endif %}
+                    <div class="group-members">{{ g.member_count }} участников</div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ===== Популярные посты ===== #}
+    <section class="explore-section">
+        <h2 class="explore-section-title">
+            <svg class="icon icon-sm"><use href="#i-compass"/></svg>
+            Популярное за неделю
+        </h2>
+        {% if posts %}
+        {% include '_posts.html' %}
+
+        {# Пагинация #}
+        {% if pages > 1 %}
+        <div class="pagination">
+            {% if page > 1 %}
+            <a class="btn btn-outline btn-sm" href="{{ url_for('explore', page=page-1) }}">← Назад</a>
+            {% endif %}
+            <span class="pagination-info">{{ page }} / {{ pages }}</span>
+            {% if page < pages %}
+            <a class="btn btn-outline btn-sm" href="{{ url_for('explore', page=page+1) }}">Вперёд →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="empty-state" style="text-align:center;color:var(--text-muted);padding:40px 16px">
+            <svg class="icon icon-xl" style="margin-bottom:8px"><use href="#i-compass"/></svg>
+            <p>Пока нет популярных постов. Будьте первым!</p>
+        </div>
+        {% endif %}
+    </section>
+
+</div>
+{% endblock body %}

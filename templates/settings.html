@@ -47,6 +47,10 @@
                 <label class="toggle {% if cu.email_notifs %}on{% endif %}" id="email-toggle" onclick="this.classList.toggle('on');document.getElementById('email-input').value=this.classList.contains('on')?'1':''"></label>
                 <input type="hidden" name="email_notifs" id="email-input" value="{% if cu.email_notifs %}1{% endif %}">
             </div>
+            <div class="settings-row" id="push-notif-row">
+                <div class="settings-row-info"><div class="label">Push-уведомления</div><div class="desc">Браузерные уведомления о новых сообщениях даже когда вкладка свёрнута.</div></div>
+                <button type="button" class="btn btn-sm" id="enable-push-btn" onclick="enablePushNotifs()">Включить</button>
+            </div>
         </div>
 
         <div class="settings-section">

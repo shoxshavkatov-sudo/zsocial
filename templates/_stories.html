@@ -1,0 +1,94 @@
+{# _stories.html — кольцо историй над лентой #}
+{% if story_groups %}
+<div class="stories-bar" id="stories-bar">
+    <div class="stories-scroll">
+        {# Кнопка "Добавить историю" — аватар текущего пользователя с плюсом #}
+        <div class="story-add" onclick="openStoryCreator()" title="Создать историю">
+            <div class="story-ring story-ring-add">
+                <img src="{{ media_url(cu.avatar) }}" class="story-avatar" alt="">
+                <span class="story-plus">+</span>
+            </div>
+            <span class="story-name">Вы</span>
+        </div>
+        {# Истории других пользователей #}
+        {% for g in story_groups %}
+        {% if g.user_id != cu.id %}
+        <div class="story-item" onclick="openStoryViewer({{ g.user_id }})" title="{{ g.display_name or g.username }}">
+            <div class="story-ring {% if g.stories|selectattr('seen','eq',false)|list|length > 0 %}has-story{% else %}seen{% endif %}">
+                <img src="{{ media_url(g.avatar) }}" class="story-avatar" alt="">
+                {% if g.verified %}<svg class="icon icon-xs story-verified"><use href="#i-check-badge"/></svg>{% endif %}
+            </div>
+            <span class="story-name">{{ g.display_name[:12] or g.username[:12] }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+{# Скрытые данные для JS #}
+<script>
+window.__STORY_DATA__ = {{ story_groups|tojson }};
+</script>
+{% endif %}
+
+{# Создание истории (скрытый файл-инпут + модальное окно) #}
+<input type="file" id="story-file-input" accept="image/*,video/*" style="display:none" onchange="handleStoryFile(this)">
+
+<div id="story-creator-modal" class="modal-overlay" style="display:none">
+    <div class="modal-card story-creator-card">
+        <div class="story-creator-header">
+            <h3>Новая история</h3>
+            <button class="btn btn-ghost btn-icon-only" onclick="closeStoryCreator()"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="story-creator-body">
+            <div id="story-preview-area" class="story-preview-area">
+                <img id="story-preview-img" style="display:none" alt="">
+                <video id="story-preview-vid" style="display:none" muted playsinline></video>
+                <p id="story-preview-placeholder">Выберите фото или видео</p>
+            </div>
+            <textarea id="story-caption-input" class="input" placeholder="Подпись (необязательно)" rows="2" maxlength="300"></textarea>
+        </div>
+        <div class="story-creator-footer">
+            <label class="btn btn-outline" onclick="document.getElementById('story-file-input').click()">
+                <svg class="icon"><use href="#i-image"/></svg> Выбрать
+            </label>
+            <button id="story-publish-btn" class="btn btn-primary" onclick="publishStory()" disabled>Опубликовать</button>
+        </div>
+    </div>
+</div>
+
+{# Полноэкранный просмотрщик историй #}
+<div id="story-viewer" class="story-viewer" style="display:none">
+    <div class="story-viewer-top">
+        <div class="story-viewer-progress" id="story-progress-bars"></div>
+        <div class="story-viewer-header">
+            <div class="story-viewer-user" id="story-viewer-user">
+                <img class="story-avatar-sm" src="" alt="">
+                <span class="story-viewer-name"></span>
+                <span class="story-viewer-time"></span>
+            </div>
+            <div class="story-viewer-actions">
+                <button class="btn btn-ghost btn-icon-only story-viewer-viewers-btn" onclick="showStoryViewers()" title="Просмотры">
+                    <svg class="icon"><use href="#i-eye"/></svg>
+                </button>
+                <button class="btn btn-ghost btn-icon-only" onclick="closeStoryViewer()" title="Закрыть">
+                    <svg class="icon"><use href="#i-x"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="story-viewer-content" id="story-viewer-content"
+         onclick="storyViewerClick(event)"
+         ontouchstart="storyTouchStart(event)" ontouchend="storyTouchEnd(event)">
+        <img id="sv-media-img" style="display:none" alt="">
+        <video id="sv-media-vid" style="display:none" playsinline muted></video>
+        <div id="sv-caption" class="story-caption" style="display:none"></div>
+    </div>
+    <div class="story-viewer-nav">
+        <button class="sv-nav-btn sv-prev" onclick="navigateStory(-1)" style="display:none">‹</button>
+        <button class="sv-nav-btn sv-next" onclick="navigateStory(1)" style="display:none">›</button>
+    </div>
+    <div id="story-viewers-list" class="story-viewers-list" style="display:none">
+        <div class="story-viewers-list-inner" id="story-viewers-inner"></div>
+    </div>
+</div>
