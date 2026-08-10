@@ -53,6 +53,42 @@
 
         {% if can_view %}
             {% if pu.bio %}<div class="profile-bio">{{ pu.bio }}</div>{% endif %}
+
+            {# === МУЗЫКА В ПРОФИЛЕ (как в Telegram) === #}
+            {% if pu.profile_music %}
+            <div class="profile-music" id="profile-music">
+                <div class="music-cover" onclick="toggleProfileMusic()">
+                    <svg class="icon music-cover-icon" id="music-play-icon"><use href="#i-play"/></svg>
+                    <div class="music-bars" id="music-bars">
+                        <span></span><span></span><span></span><span></span>
+                    </div>
+                </div>
+                <div class="music-info">
+                    <div class="music-title">{{ pu.profile_music_title or 'Без названия' }}</div>
+                    <div class="music-artist">@{{ pu.username }}</div>
+                    <div class="music-progress-wrap" onclick="seekProfileMusic(event)">
+                        <div class="music-progress" id="music-progress"></div>
+                    </div>
+                    <div class="music-time">
+                        <span id="music-current">0:00</span>
+                        <span id="music-duration">0:00</span>
+                    </div>
+                </div>
+                {% if cu.id == pu.id %}
+                <button class="music-remove" onclick="removeProfileMusic()" title="Убрать музыку">
+                    <svg class="icon icon-sm"><use href="#i-trash"/></svg>
+                </button>
+                {% endif %}
+                <audio id="profile-audio" src="{{ media_url(pu.profile_music) }}" preload="metadata"></audio>
+            </div>
+            {% elif cu.id == pu.id %}
+            <div class="profile-music-add" onclick="document.getElementById('music-upload-input').click()">
+                <svg class="icon"><use href="#i-music"/></svg>
+                <span>Добавить музыку в профиль</span>
+                <input type="file" id="music-upload-input" accept="audio/*" class="hidden" onchange="uploadProfileMusic(this)">
+            </div>
+            {% endif %}
+
             {% if pu.status %}<div class="profile-meta"><span><svg class="icon icon-sm"><use href="#i-user"/></svg> {{ pu.status }}</span></div>{% endif %}
             <div class="profile-meta">
                 <span><svg class="icon icon-sm"><use href="#i-calendar"/></svg> с {{ pu.created_at[:7] if pu.created_at else '' }}</span>

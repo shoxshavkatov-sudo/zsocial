@@ -8,9 +8,11 @@ from config import Config
 def get_db():
     from flask import g
     if 'db' not in g:
-        g.db = sqlite3.connect(Config.DATABASE)
+        g.db = sqlite3.connect(Config.DATABASE, timeout=10)
         g.db.row_factory = sqlite3.Row
         g.db.execute('PRAGMA foreign_keys = ON')
+        g.db.execute('PRAGMA journal_mode = WAL')
+        g.db.execute('PRAGMA synchronous = NORMAL')
     return g.db
 
 
@@ -18,13 +20,19 @@ def close_db(e=None):
     from flask import g
     db = g.pop('db', None)
     if db is not None:
+        try:
+            db.commit()
+        except Exception:
+            pass
         db.close()
 
 
 def init_db():
     os.makedirs(os.path.dirname(Config.DATABASE) or '.', exist_ok=True)
-    conn = sqlite3.connect(Config.DATABASE)
+    conn = sqlite3.connect(Config.DATABASE, timeout=10)
     conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA journal_mode = WAL')
+    conn.execute('PRAGMA synchronous = NORMAL')
 
     conn.executescript('''
     CREATE TABLE IF NOT EXISTS users (
@@ -278,6 +286,8 @@ def migrate_db():
         'email_notifs': 'INTEGER DEFAULT 1',
         'token_version': 'INTEGER DEFAULT 0',
         'last_seen': 'TIMESTAMP',
+        'profile_music': 'TEXT',
+        'profile_music_title': 'TEXT',
     }
     for col, typedef in user_new.items():
         if col not in ucols:
@@ -439,9 +449,16 @@ def migrate_db():
         if tname not in tables:
             conn.execute(tsql)
 
-    # Доп. колонки в messages для ответов/редактирования (Этап 2)
+    # Доп. колонки в messages для ответов/редактирования/пересылки/закрепа (Этап 2 + редизайн)
     msg_cols = [r[1] for r in conn.execute('PRAGMA table_info(messages)').fetchall()]
-    for col, typedef in {'reply_to_id': 'INTEGER', 'edited_at': 'TIMESTAMP'}.items():
+    msg_new_cols = {
+        'reply_to_id': 'INTEGER',
+        'edited_at': 'TIMESTAMP',
+        'forwarded_from_id': 'INTEGER',
+        'forwarded_from_name': 'TEXT',
+        'is_pinned': 'INTEGER DEFAULT 0',
+    }
+    for col, typedef in msg_new_cols.items():
         if col not in msg_cols:
             conn.execute(f'ALTER TABLE messages ADD COLUMN {col} {typedef}')
 
@@ -906,12 +923,12 @@ class Follow:
 
 class Message:
     @staticmethod
-    def create(s, r, content, msg_type='text', file_url=None, file_name=None, file_size=0, duration=0, reply_to_id=None):
+    def create(s, r, content, msg_type='text', file_url=None, file_name=None, file_size=0, duration=0, reply_to_id=None, forwarded_from_id=None, forwarded_from_name=None):
         db = get_db()
         db.execute('''INSERT INTO messages
-            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration, reply_to_id)
-            VALUES (?,?,?,?,?,?,?,?,?)''',
-            (s, r, content, msg_type, file_url, file_name, file_size, duration, reply_to_id))
+            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration, reply_to_id, forwarded_from_id, forwarded_from_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+            (s, r, content, msg_type, file_url, file_name, file_size, duration, reply_to_id, forwarded_from_id, forwarded_from_name))
         db.commit()
         return db.execute('SELECT * FROM messages WHERE id = last_insert_rowid()').fetchone()
 
@@ -960,7 +977,8 @@ class Message:
     def get_dialogs(uid):
         db = get_db()
         rows = db.execute('''
-            SELECT convos.other_id, u.username, u.display_name, u.avatar, u.verified,
+            SELECT convos.other_id, u.username, u.display_name, u.avatar, u.verified, u.last_seen,
+                   CASE WHEN u.last_seen IS NOT NULL AND datetime(u.last_seen) >= datetime('now','-2 minutes') THEN 1 ELSE 0 END AS online,
                    (SELECT content FROM messages
                     WHERE (sender_id=convos.other_id AND receiver_id=?)
                        OR (sender_id=? AND receiver_id=convos.other_id)
@@ -1030,6 +1048,68 @@ class Message:
             'SELECT emoji, COUNT(*) as cnt FROM message_reactions WHERE message_id=? GROUP BY emoji',
             (mid,)
         ).fetchall()
+
+    @staticmethod
+    def search(uid, partner_id, query):
+        """Поиск по тексту сообщений в переписке двух пользователей."""
+        db = get_db()
+        like = f'%{query}%'
+        return db.execute('''
+            SELECT m.*, u.username, u.avatar, u.verified
+            FROM messages m JOIN users u ON m.sender_id = u.id
+            WHERE ((m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?))
+              AND m.content LIKE ?
+            ORDER BY m.created_at ASC
+        ''', (uid, partner_id, partner_id, uid, like)).fetchall()
+
+    @staticmethod
+    def forward(mid, to_uid, from_uid):
+        """Переслать сообщение другому пользователю (создаёт копию с пометкой)."""
+        db = get_db()
+        m = Message.get(mid)
+        if not m:
+            return None
+        sender = db.execute('SELECT username, display_name FROM users WHERE id=?', (from_uid,)).fetchone()
+        from_name = (sender['display_name'] or sender['username']) if sender else 'Unknown'
+        db.execute('''INSERT INTO messages
+            (sender_id, receiver_id, content, msg_type, file_url, file_name, file_size, duration, forwarded_from_id, forwarded_from_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            (from_uid, to_uid, m['content'], m['msg_type'], m['file_url'], m['file_name'],
+             m['file_size'], m['duration'], from_uid, from_name))
+        db.commit()
+        return db.execute('SELECT * FROM messages WHERE id = last_insert_rowid()').fetchone()
+
+    @staticmethod
+    def toggle_pin(mid, uid):
+        """Закрепить/открепить сообщение (только участники переписки)."""
+        db = get_db()
+        m = Message.get(mid)
+        if not m:
+            return False
+        if m['sender_id'] != uid and m['receiver_id'] != uid:
+            return False
+        # Снимаем все закрепы в этом диалоге (только 1 закреп)
+        partner_id = m['receiver_id'] if m['sender_id'] == uid else m['sender_id']
+        db.execute('''UPDATE messages SET is_pinned=0
+                      WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)''',
+                    (uid, partner_id, partner_id, uid))
+        if not m['is_pinned']:
+            db.execute('UPDATE messages SET is_pinned=1 WHERE id=?', (mid,))
+            db.commit()
+            return True
+        db.commit()
+        return False
+
+    @staticmethod
+    def get_pinned(uid, partner_id):
+        """Получить закреплённое сообщение в диалоге (одно)."""
+        db = get_db()
+        return db.execute('''SELECT m.*, u.username, u.avatar, u.verified
+                             FROM messages m JOIN users u ON m.sender_id = u.id
+                             WHERE m.is_pinned=1 AND (
+                               (m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?))
+                             ORDER BY m.created_at DESC LIMIT 1''',
+                          (uid, partner_id, partner_id, uid)).fetchone()
 
     @staticmethod
     def my_reaction(mid, uid):

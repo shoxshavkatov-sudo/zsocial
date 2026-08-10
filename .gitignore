@@ -10,6 +10,8 @@ __pycache__/
 # Окружение
 .env
 .secret_key
+.vapid_private
+.vapid_public
 
 # Загруженные пользователями файлы (не в репозитории)
 static/uploads/*

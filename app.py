@@ -1,6 +1,7 @@
 """ZSocial — социальная сеть. Production версия с чатом, закладками, хештегами, админкой."""
 import os
 import re
+import atexit
 from functools import wraps
 from datetime import datetime
 
@@ -250,6 +251,22 @@ with app.app_context():
     init_db()
     migrate_db()
     _seed_if_empty()
+
+
+# Гарантия сохранения данных: checkpoint WAL перед завершением процесса.
+# Без этого при kill -9 несохранённые WAL-страницы могут потеряться.
+def _db_checkpoint_on_exit():
+    try:
+        import sqlite3
+        conn = sqlite3.connect(Config.DATABASE)
+        conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+atexit.register(_db_checkpoint_on_exit)
 
 
 # ==================== ХЕЛПЕРЫ ====================
@@ -899,6 +916,41 @@ def settings():
     return render_template('settings.html')
 
 
+# ==================== МУЗЫКА В ПРОФИЛЕ ====================
+@app.route('/profile/music/upload', methods=['POST'])
+@login_required
+@limiter.limit("10/minute")
+def upload_profile_music():
+    """Загрузка музыки в профиль (как в Telegram)."""
+    file = request.files.get('music')
+    title = request.form.get('title', '').strip()
+    if not file or not file.filename:
+        return jsonify({'error': 'Файл не выбран'}), 400
+    fn = file.filename.lower()
+    if not ('.' in fn and fn.rsplit('.', 1)[1] in {'mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'}):
+        return jsonify({'error': 'Поддерживаются: MP3, WAV, OGG, M4A'}), 400
+    music_path = save_file(file, 'music')
+    if not title:
+        title = secure_filename(file.filename).rsplit('.', 1)[0].replace('_', ' ')[:80]
+    db = get_db()
+    db.execute('UPDATE users SET profile_music=?, profile_music_title=? WHERE id=?',
+               (music_path, title, session['user_id']))
+    db.commit()
+    return jsonify({'ok': True, 'music': music_path, 'title': title,
+                    'music_url': _media_for(music_path)})
+
+
+@app.route('/profile/music/remove', methods=['POST'])
+@login_required
+def remove_profile_music():
+    """Удаление музыки из профиля."""
+    db = get_db()
+    db.execute('UPDATE users SET profile_music=NULL, profile_music_title=NULL WHERE id=?',
+               (session['user_id'],))
+    db.commit()
+    return jsonify({'ok': True})
+
+
 @app.route('/settings/password', methods=['POST'])
 @login_required
 def change_password():
@@ -1020,6 +1072,9 @@ def chat():
     dialogs = Message.get_dialogs(u['id'])
     partner = None
     messages = []
+    partner_online = False
+    partner_status = ''
+    pinned_msg = None
     with_user = request.args.get('with')
     if with_user:
         partner = User.get_by_username(with_user)
@@ -1030,7 +1085,19 @@ def chat():
             for m in messages:
                 m['reactions'] = [{'emoji': r['emoji'], 'count': r['cnt']} for r in Message.get_reactions(m['id'])]
             Message.mark_read(partner['id'], u['id'])
-    return render_template('chat.html', dialogs=dialogs, partner=partner, messages=messages)
+            # онлайн-статус партнёра
+            partner_online = is_online(partner)
+            if partner_online:
+                partner_status = 'в сети'
+            elif partner['last_seen']:
+                partner_status = f'был(а) {time_ago(partner["last_seen"])}'
+            else:
+                partner_status = 'был(а) недавно'
+            # закреплённое сообщение
+            pinned_msg = Message.get_pinned(u['id'], partner['id'])
+    return render_template('chat.html', dialogs=dialogs, partner=partner, messages=messages,
+                           partner_online=partner_online, partner_status=partner_status,
+                           pinned_msg=pinned_msg)
 
 
 @app.route('/chat/send', methods=['POST'])
@@ -1173,6 +1240,59 @@ def react_message(mid):
     socketio.emit('message_reaction', data, room=f'user_{m["receiver_id"]}')
     socketio.emit('message_reaction', data, room=f'user_{m["sender_id"]}')
     return jsonify(data)
+
+
+@app.route('/chat/<int:partner_id>/search')
+@login_required
+def search_chat_messages(partner_id):
+    """Поиск по тексту сообщений в переписке."""
+    q = request.args.get('q', '').strip()
+    if not q or not User.get(partner_id):
+        return jsonify({'results': []})
+    results = Message.search(session['user_id'], partner_id, q)
+    return jsonify({'results': [{'id': r['id'], 'content': r['content'][:120],
+                                  'time': time_ago(r['created_at']),
+                                  'sender_id': r['sender_id']} for r in results]})
+
+
+@app.route('/chat/<int:mid>/forward', methods=['POST'])
+@login_required
+@limiter.limit("20/minute")
+def forward_message(mid):
+    """Переслать сообщение другому пользователю."""
+    to_uid = (request.get_json(silent=True) or {}).get('to_user_id')
+    if not to_uid or not User.get(to_uid):
+        return jsonify({'error': 'Получатель не найден'}), 400
+    new_msg = Message.forward(mid, to_uid, session['user_id'])
+    if not new_msg:
+        return jsonify({'error': 'Не удалось переслать'}), 400
+    u = current_user()
+    data = {
+        'id': new_msg['id'], 'content': new_msg['content'], 'msg_type': new_msg['msg_type'],
+        'file_url': new_msg['file_url'], 'file_name': new_msg['file_name'],
+        'file_size': new_msg['file_size'], 'duration': new_msg['duration'],
+        'sender_id': new_msg['sender_id'], 'receiver_id': new_msg['receiver_id'],
+        'time': time_ago(new_msg['created_at']),
+        'sender_username': u['username'], 'sender_avatar': u['avatar'],
+        'file_url_full': _media_for(new_msg['file_url']) if new_msg['file_url'] else None,
+        'forwarded_from_name': new_msg['forwarded_from_name'] if 'forwarded_from_name' in new_msg.keys() else None,
+    }
+    socketio.emit('new_message', data, room=f'user_{to_uid}')
+    socketio.emit('new_message', data, room=f'user_{session["user_id"]}')
+    return jsonify({'ok': True, 'id': new_msg['id']})
+
+
+@app.route('/chat/<int:mid>/pin', methods=['POST'])
+@login_required
+def pin_message(mid):
+    """Закрепить/открепить сообщение в диалоге."""
+    pinned = Message.toggle_pin(mid, session['user_id'])
+    m = Message.get(mid)
+    if m:
+        data = {'id': mid, 'pinned': pinned}
+        socketio.emit('message_pinned', data, room=f'user_{m["receiver_id"]}')
+        socketio.emit('message_pinned', data, room=f'user_{m["sender_id"]}')
+    return jsonify({'ok': True, 'pinned': pinned})
 
 
 # ==================== УВЕДОМЛЕНИЯ ====================
@@ -1501,6 +1621,19 @@ def create_story():
         return jsonify({'error': 'Неподдерживаемый формат'}), 400
     story = Story.create(session['user_id'], media_path, media_type, caption or None)
     return jsonify({'ok': True, 'id': story['id'], 'media': media_path, 'media_type': media_type})
+
+
+@app.route('/api/user/id')
+@login_required
+def api_user_id():
+    """Возвращает id пользователя по username (для пересылки и т.д.)."""
+    username = request.args.get('username', '').strip()
+    if not username:
+        return jsonify({'error': 'no username'}), 400
+    u = User.get_by_username(username)
+    if not u:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'id': u['id'], 'username': u['username']})
 
 
 @app.route('/api/stories')

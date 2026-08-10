@@ -503,3 +503,221 @@ class TestWebPush:
             db = get_db()
             count = db.execute("SELECT COUNT(*) c FROM push_subscriptions WHERE endpoint='https://example.com/push/same'").fetchone()['c']
             assert count == 1
+
+
+# ==================== ПОИСК ПО СООБЩЕНИЯМ ====================
+
+class TestMessageSearch:
+    def test_search_finds_messages(self, app):
+        c1 = auth_client(app, username='searcher1')
+        register(app.test_client(), username='searchtarget1')
+        with app.app_context():
+            from models import User
+            rid = User.get_by_username('searchtarget1')['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Important keyword Python'})
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Other message without keyword'})
+        r = c1.get(f'/chat/{rid}/search?q=Python')
+        assert r.status_code == 200
+        results = r.get_json()['results']
+        assert len(results) == 1
+        assert 'Python' in results[0]['content']
+
+    def test_search_empty_query(self, app):
+        c1 = auth_client(app, username='searcher2')
+        register(app.test_client(), username='searchtarget2')
+        with app.app_context():
+            from models import User
+            rid = User.get_by_username('searchtarget2')['id']
+        r = c1.get(f'/chat/{rid}/search?q=')
+        assert r.status_code == 200
+        assert len(r.get_json()['results']) == 0
+
+
+# ==================== ПЕРЕСЫЛКА СООБЩЕНИЙ ====================
+
+class TestMessageForward:
+    def test_forward_message(self, app):
+        c1 = auth_client(app, username='forwarder')
+        register(app.test_client(), username='fwd_target')
+        register(app.test_client(), username='fwd_receiver')
+        with app.app_context():
+            from models import User
+            tid = User.get_by_username('fwd_target')['id']
+            rid = User.get_by_username('fwd_receiver')['id']
+        # Отправляем исходное сообщение
+        c1.post('/chat/send', data={'receiver_id': tid, 'content': 'Original to forward'})
+        with app.app_context():
+            from models import get_db
+            mid = get_db().execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        # Пересылаем
+        r = c1.post(f'/chat/{mid}/forward', json={'to_user_id': rid})
+        assert r.status_code == 200
+        assert r.get_json()['ok'] is True
+        # Проверяем что пересланное сообщение в БД с пометкой
+        with app.app_context():
+            from models import get_db
+            fwd = get_db().execute('SELECT * FROM messages WHERE forwarded_from_name IS NOT NULL ORDER BY id DESC LIMIT 1').fetchone()
+            assert fwd is not None
+            assert fwd['content'] == 'Original to forward'
+            assert fwd['forwarded_from_name'] == 'forwarder'
+
+
+# ==================== ЗАРЕП СООБЩЕНИЙ ====================
+
+class TestMessagePin:
+    def test_pin_message(self, app):
+        c1 = auth_client(app, username='pinner')
+        register(app.test_client(), username='pintarget')
+        with app.app_context():
+            from models import User
+            rid = User.get_by_username('pintarget')['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Pin me please'})
+        with app.app_context():
+            from models import get_db
+            mid = get_db().execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        r = c1.post(f'/chat/{mid}/pin')
+        assert r.status_code == 200
+        assert r.get_json()['pinned'] is True
+        # Проверяем в БД
+        with app.app_context():
+            from models import get_db
+            m = get_db().execute('SELECT is_pinned FROM messages WHERE id=?', (mid,)).fetchone()
+            assert m['is_pinned'] == 1
+
+    def test_unpin_message(self, app):
+        c1 = auth_client(app, username='pinner2')
+        register(app.test_client(), username='pintarget2')
+        with app.app_context():
+            from models import User
+            rid = User.get_by_username('pintarget2')['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Pin and unpin'})
+        with app.app_context():
+            from models import get_db
+            mid = get_db().execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        c1.post(f'/chat/{mid}/pin')  # pin
+        r = c1.post(f'/chat/{mid}/pin')  # unpin
+        assert r.status_code == 200
+        assert r.get_json()['pinned'] is False
+
+    def test_get_pinned(self, app):
+        c1 = auth_client(app, username='pinner3')
+        register(app.test_client(), username='pintarget3')
+        with app.app_context():
+            from models import User, Message
+            rid = User.get_by_username('pintarget3')['id']
+            uid = User.get_by_username('pinner3')['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Pinned content'})
+        with app.app_context():
+            from models import get_db
+            mid = get_db().execute('SELECT MAX(id) id FROM messages').fetchone()['id']
+        c1.post(f'/chat/{mid}/pin')
+        with app.app_context():
+            from models import Message
+            pinned = Message.get_pinned(uid, rid)
+            assert pinned is not None
+            assert pinned['content'] == 'Pinned content'
+
+
+# ==================== МУЗЫКА В ПРОФИЛЕ ====================
+
+class TestProfileMusic:
+    def test_upload_requires_auth(self, client):
+        r = client.post('/profile/music/upload')
+        assert r.status_code == 302  # redirect to login
+
+    def test_upload_music(self, app):
+        import io
+        client = auth_client(app, username='musiclover')
+        mp3 = io.BytesIO(b'ID3' + b'\x00' * 200)
+        mp3.name = 'song.mp3'
+        r = client.post('/profile/music/upload', data={
+            'music': (mp3, 'song.mp3'),
+            'title': 'My Song',
+        }, content_type='multipart/form-data')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data['ok'] is True
+        assert data['title'] == 'My Song'
+        # Проверяем в БД
+        with app.app_context():
+            from models import User
+            u = User.get_by_username('musiclover')
+            assert u['profile_music'] is not None
+            assert u['profile_music_title'] == 'My Song'
+
+    def test_remove_music(self, app):
+        import io
+        client = auth_client(app, username='musiclover2')
+        mp3 = io.BytesIO(b'ID3' + b'\x00' * 200)
+        mp3.name = 'song.mp3'
+        client.post('/profile/music/upload', data={
+            'music': (mp3, 'song.mp3'),
+            'title': 'Temp Song',
+        }, content_type='multipart/form-data')
+        r = client.post('/profile/music/remove')
+        assert r.status_code == 200
+        assert r.get_json()['ok'] is True
+        with app.app_context():
+            from models import User
+            u = User.get_by_username('musiclover2')
+            assert u['profile_music'] is None
+
+    def test_reject_non_audio(self, app):
+        import io
+        client = auth_client(app, username='musiclover3')
+        txt = io.BytesIO(b'not a music file')
+        txt.name = 'file.txt'
+        r = client.post('/profile/music/upload', data={
+            'music': (txt, 'file.txt'),
+        }, content_type='multipart/form-data')
+        assert r.status_code == 400
+
+
+# ==================== API USER ID ====================
+
+class TestApiUserId:
+    def test_get_user_id(self, app):
+        auth_client(app, username='apiuser')
+        client = auth_client(app, username='apicaller')
+        r = client.get('/api/user/id?username=apiuser')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data['id'] is not None
+        assert data['username'] == 'apiuser'
+
+    def test_get_user_id_not_found(self, app):
+        client = auth_client(app, username='apicaller2')
+        r = client.get('/api/user/id?username=nonexistent')
+        assert r.status_code == 404
+
+
+# ==================== ПЕРСИСТЕНТНОСТЬ ДАННЫХ ====================
+
+class TestDataPersistence:
+    def test_post_survives_reinit(self, app):
+        """Данные сохраняются после повторной инициализации БД."""
+        client = auth_client(app, username='persistuser')
+        client.post('/post/create', data={'content': 'Persistence test 12345'})
+        # Повторно инициализируем БД (имитация рестарта)
+        with app.app_context():
+            from models import init_db, migrate_db, get_db
+            init_db()
+            migrate_db()
+            db = get_db()
+            row = db.execute("SELECT content FROM posts WHERE content = 'Persistence test 12345'").fetchone()
+            assert row is not None
+
+    def test_message_survives_reinit(self, app):
+        c1 = auth_client(app, username='persistmsg')
+        register(app.test_client(), username='persistrecv')
+        with app.app_context():
+            from models import User
+            rid = User.get_by_username('persistrecv')['id']
+        c1.post('/chat/send', data={'receiver_id': rid, 'content': 'Persist message'})
+        with app.app_context():
+            from models import init_db, migrate_db, get_db
+            init_db()
+            migrate_db()
+            db = get_db()
+            row = db.execute("SELECT content FROM messages WHERE content = 'Persist message'").fetchone()
+            assert row is not None

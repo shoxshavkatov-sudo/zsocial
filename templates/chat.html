@@ -3,12 +3,21 @@
 {% block body %}
 <div class="chat-page {% if partner %}show-window{% endif %}" id="chat-page" {% if partner %}data-partner-id="{{ partner.id }}"{% endif %}>
     <div class="chat-list-panel">
-        <div class="chat-list-header"><h2>Сообщения</h2></div>
-        <div class="chat-list">
+        <div class="chat-list-header">
+            <h2>Сообщения</h2>
+            <div class="chat-list-search">
+                <svg class="icon"><use href="#i-search"/></svg>
+                <input type="text" id="chat-list-filter" placeholder="Поиск по чатам..." autocomplete="off">
+            </div>
+        </div>
+        <div class="chat-list" id="chat-list">
             {% if dialogs %}
                 {% for d in dialogs %}
-                <button class="chat-list-item {% if partner and partner.id == d.other_id %}active{% endif %}" onclick="location.href='{{ url_for('chat', with=d.username) }}'">
-                    <img src="{{ media_url(d.avatar) }}">
+                <button class="chat-list-item {% if partner and partner.id == d.other_id %}active{% endif %}" data-name="{{ (d.display_name or d.username)|lower }}" onclick="location.href='{{ url_for('chat', with=d.username) }}'">
+                    <div class="chat-avatar-wrap">
+                        <img src="{{ media_url(d.avatar) }}">
+                        {% if d.online %}<span class="online-dot pulse"></span>{% endif %}
+                    </div>
                     <div class="chat-list-info">
                         <div class="chat-list-top">
                             <span class="name">{{ d.display_name or d.username }} {% if d.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</span>
@@ -40,21 +49,43 @@
     <div class="chat-window">
         {% if partner %}
         <div class="chat-window-head">
-            <button class="btn btn-ghost btn-icon-only" onclick="location.href='{{ url_for('chat') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
-            <img src="{{ media_url(partner.avatar) }}" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
+            <button class="chat-head-back" onclick="location.href='{{ url_for('chat') }}'"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+            <div class="chat-avatar-wrap">
+                <img src="{{ media_url(partner.avatar) }}" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
+                {% if partner_online %}<span class="online-dot pulse"></span>{% endif %}
+            </div>
             <div class="info" onclick="location.href='{{ url_for('profile', username=partner.username) }}'">
                 <strong>{{ partner.display_name or partner.username }} {% if partner.verified %}<svg class="icon icon-sm verified-mark"><use href="#i-check-badge"/></svg>{% endif %}</strong>
-                <span>@{{ partner.username }}</span>
+                <div class="status-text {% if partner_online %}online{% endif %}">{% if partner_online %}в сети{% else %}{{ partner_status }}{% endif %}</div>
             </div>
-            <div class="call-actions">
-                <button class="call-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', false)" title="Голосовой звонок">
-                    <svg class="icon"><use href="#i-phone"/></svg>
-                </button>
-                <button class="call-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', true)" title="Видеозвонок">
-                    <svg class="icon"><use href="#i-video"/></svg>
-                </button>
+            <div class="chat-head-actions">
+                <button class="chat-head-btn" onclick="toggleChatSearch()" title="Поиск"><svg class="icon"><use href="#i-search"/></svg></button>
+                <button class="chat-head-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', false)" title="Звонок"><svg class="icon"><use href="#i-phone"/></svg></button>
+                <button class="chat-head-btn" onclick="startCall({{ partner.id }}, '{{ (partner.display_name or partner.username)|replace("'", "\\'") }}', true)" title="Видео"><svg class="icon"><use href="#i-video"/></svg></button>
             </div>
         </div>
+
+        {# Поиск по сообщениям #}
+        <div class="chat-search-bar" id="chat-search-bar">
+            <input type="text" id="chat-search-input" placeholder="Поиск в переписке..." oninput="searchMessages(this.value)">
+            <div class="chat-search-nav">
+                <button onclick="navSearch(-1)" title="Назад">↑</button>
+                <span id="search-count">0</span>
+                <button onclick="navSearch(1)" title="Вперёд">↓</button>
+            </div>
+            <button onclick="toggleChatSearch()" title="Закрыть"><svg class="icon"><use href="#i-close"/></svg></button>
+        </div>
+
+        {# Закреплённое сообщение #}
+        {% if pinned_msg %}
+        <div class="pinned-bar" onclick="scrollToMessage({{ pinned_msg.id }})">
+            <svg class="icon pin-icon"><use href="#i-bookmark"/></svg>
+            <div class="pin-info">
+                <div class="pin-label">Закреплено</div>
+                <div class="pin-text">{{ pinned_msg.content[:80] }}</div>
+            </div>
+        </div>
+        {% endif %}
 
         <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
             {% if messages %}
@@ -63,19 +94,24 @@
                     {% if m.sender_id == cu.id %}
                     <div class="msg-actions-bar">
                         <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
-                        {% if m.msg_type == 'text' %}
                         <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
+                        <button onclick="openForwardModal({{ m.id }})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
+                        <button onclick="togglePinMessage({{ m.id }}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>
+                        {% if m.msg_type == 'text' %}
                         <button onclick="editMsg({{ m.id }})" title="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"/></svg></button>
-                        {% endif %}
                         <button onclick="deleteMsg({{ m.id }})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>
+                        {% endif %}
                     </div>
                     {% else %}
                     <div class="msg-actions-bar">
                         <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
-                        {% if m.msg_type == 'text' %}
                         <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
-                        {% endif %}
+                        <button onclick="openForwardModal({{ m.id }})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
+                        <button onclick="togglePinMessage({{ m.id }}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>
                     </div>
+                    {% endif %}
+                    {% if m.forwarded_from_name %}
+                    <div class="forward-label"><svg class="icon icon-sm"><use href="#i-share"/></svg> Переслано от <strong>{{ m.forwarded_from_name }}</strong></div>
                     {% endif %}
                     {% if m.reply_to_content %}
                         <div class="reply-quote">
@@ -152,11 +188,12 @@
         <div id="chat-preview-area"></div>
 
         <div class="chat-input-area">
-            <div class="chat-tools">
+            <div class="chat-input-inner">
                 <button class="chat-tool-btn" onclick="document.getElementById('file-input').click()" title="Файл">
                     <svg class="icon"><use href="#i-paperclip"/></svg>
                 </button>
                 <input type="file" id="file-input" class="hidden" onchange="sendFile({{ partner.id }}, this)">
+                <input id="chat-input" placeholder="Сообщение..." oninput="notifyTyping({{ partner.id }}); updateSendBtn()" onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
                 <button class="chat-tool-btn" onclick="document.getElementById('image-input').click()" title="Фото/Видео">
                     <svg class="icon"><use href="#i-image"/></svg>
                 </button>
@@ -165,8 +202,18 @@
                     <svg class="icon"><use href="#i-mic"/></svg>
                 </button>
             </div>
-            <input id="chat-input" placeholder="Сообщение..." oninput="notifyTyping({{ partner.id }})" onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
-            <button class="btn btn-primary btn-icon-only" onclick="sendMessage({{ partner.id }})"><svg class="icon"><use href="#i-send"/></svg></button>
+            <button class="chat-send-btn" id="chat-send-btn" onclick="sendMessage({{ partner.id }})" disabled><svg class="icon"><use href="#i-send"/></svg></button>
+        </div>
+
+        {# Модалка пересылки #}
+        <div class="forward-modal" id="forward-modal">
+            <div class="forward-sheet">
+                <div class="forward-sheet-header">
+                    <h3>Переслать</h3>
+                    <button onclick="closeForwardModal()">×</button>
+                </div>
+                <div id="forward-targets"></div>
+            </div>
         </div>
         {% else %}
         <div class="chat-placeholder">

@@ -564,6 +564,11 @@ function renderReactions(mid, reactions) {
 
 function renderMessageHTML(data, isMine) {
     const t = data.msg_type || 'text';
+    // Forward label
+    let forwardHTML = '';
+    if (data.forwarded_from_name) {
+        forwardHTML = `<div class="forward-label"><svg class="icon icon-sm"><use href="#i-share"/></svg> Переслано от <strong>${esc(data.forwarded_from_name)}</strong></div>`;
+    }
     // Reply quote
     let replyHTML = '';
     if (data.reply_to_content) {
@@ -593,7 +598,7 @@ function renderMessageHTML(data, isMine) {
     }
     // Read check for mine
     const checkHTML = isMine ? `<span class="msg-check ${data.is_read ? 'read' : 'unread'}"><svg class="icon"><use href="#i-check"/></svg><svg class="icon"><use href="#i-check"/></svg></span>` : '';
-    return replyHTML + inner + `<div class="msg-time">${data.time} ${checkHTML}</div>`;
+    return forwardHTML + replyHTML + inner + `<div class="msg-time">${data.time} ${checkHTML}</div>`;
 }
 
 function appendMessage(container, data, myId) {
@@ -601,10 +606,12 @@ function appendMessage(container, data, myId) {
     const div = document.createElement('div');
     div.className = 'msg ' + (isMine ? 'mine' : 'theirs');
     div.id = 'msg-' + data.id;
-    // Actions bar: reply always, edit only for text + mine, delete only mine
+    // Actions bar: reply + forward + pin always, edit/delete only mine
     const isText = (data.msg_type || 'text') === 'text';
     let actions = `<div class="msg-actions-bar">
-        <button onclick="replyToMsg(${data.id})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>`;
+        <button onclick="replyToMsg(${data.id})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
+        <button onclick="openForwardModal(${data.id})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
+        <button onclick="togglePinMessage(${data.id}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>`;
     if (isMine && isText) actions += `<button onclick="editMsg(${data.id})" title="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"/></svg></button>`;
     if (isMine) actions += `<button onclick="deleteMsg(${data.id})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>`;
     actions += '</div>';
@@ -834,6 +841,196 @@ function hideSendingIndicator() {
     const area = document.getElementById('chat-preview-area');
     if (area) area.innerHTML = '';
 }
+
+// ===== ПОИСК ПО СООБЩЕНИЯМ =====
+let searchMatches = [];
+let searchIdx = 0;
+
+function toggleChatSearch() {
+    var bar = document.getElementById('chat-search-bar');
+    if (!bar) return;
+    bar.classList.toggle('visible');
+    if (bar.classList.contains('visible')) {
+        var inp = document.getElementById('chat-search-input');
+        if (inp) { inp.value = ''; inp.focus(); }
+        searchMatches = [];
+        document.getElementById('search-count').textContent = '0';
+        // снимаем подсветку
+        document.querySelectorAll('.search-highlight').forEach(function(el) {
+            var parent = el.parentNode;
+            parent.replaceChild(document.createTextNode(el.textContent), el);
+            parent.normalize();
+        });
+    }
+}
+
+function searchMessages(q) {
+    // снимаем старую подсветку
+    document.querySelectorAll('.search-highlight').forEach(function(el) {
+        var parent = el.parentNode;
+        parent.replaceChild(document.createTextNode(el.textContent), el);
+        parent.normalize();
+    });
+    if (!q || q.length < 1) {
+        searchMatches = [];
+        document.getElementById('search-count').textContent = '0';
+        return;
+    }
+    var container = document.getElementById('chat-messages');
+    if (!container) return;
+    searchMatches = [];
+    // ищем по всем .msg-text-N и .msg-bubble
+    var msgs = container.querySelectorAll('.msg-bubble');
+    msgs.forEach(function(bubble) {
+        var html = bubble.innerHTML;
+        var text = bubble.textContent;
+        var lower = text.toLowerCase();
+        var ql = q.toLowerCase();
+        var idx = lower.indexOf(ql);
+        if (idx >= 0) {
+            var msg = bubble.closest('.msg');
+            if (msg) searchMatches.push(msg);
+        }
+    });
+    // подсветка
+    var ql = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp('(' + ql + ')', 'gi');
+    msgs.forEach(function(bubble) {
+        if (bubble.textContent.toLowerCase().indexOf(q.toLowerCase()) >= 0) {
+            // только текстовые узлы подсвечиваем
+            (function walk(node) {
+                if (node.nodeType === 3) {
+                    var span = document.createElement('span');
+                    span.innerHTML = node.textContent.replace(re, '<span class="search-highlight">$1</span>');
+                    node.parentNode.replaceChild(span, node);
+                } else if (node.nodeType === 1 && !['SCRIPT','STYLE','IMG','VIDEO','AUDIO'].includes(node.tagName)) {
+                    Array.from(node.childNodes).forEach(walk);
+                }
+            })(bubble);
+        }
+    });
+    document.getElementById('search-count').textContent = searchMatches.length;
+    searchIdx = 0;
+    if (searchMatches.length) searchMatches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function navSearch(dir) {
+    if (!searchMatches.length) return;
+    searchIdx = (searchIdx + dir + searchMatches.length) % searchMatches.length;
+    searchMatches[searchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ===== ПЕРЕСЫЛКА СООБЩЕНИЙ =====
+let forwardMsgId = null;
+
+function openForwardModal(mid) {
+    forwardMsgId = mid;
+    var modal = document.getElementById('forward-modal');
+    var targets = document.getElementById('forward-targets');
+    if (!modal || !targets) return;
+    targets.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Загрузка...</div>';
+    modal.classList.add('visible');
+    fetch('/chat').then(function(r) { return r.text(); }).then(function(html) {
+        // парсим список диалогов из HTML
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(html, 'text/html');
+        var items = doc.querySelectorAll('.chat-list-item');
+        targets.innerHTML = '';
+        if (!items.length) {
+            targets.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Нет диалогов</div>';
+            return;
+        }
+        items.forEach(function(item) {
+            var img = item.querySelector('img');
+            var name = item.querySelector('.name');
+            var preview = item.querySelector('.preview');
+            var onclick = item.getAttribute('onclick') || '';
+            var m = onclick.match(/with=([^'"&]+)/);
+            var username = m ? decodeURIComponent(m[1]) : '';
+            var btn = document.createElement('button');
+            btn.className = 'forward-target';
+            btn.innerHTML = (img ? '<img src="' + img.src + '">' : '') +
+                '<div><div class="name">' + (name ? name.textContent.trim() : username) + '</div>' +
+                '<div class="last">' + (preview ? preview.textContent.trim() : '') + '</div></div>';
+            btn.onclick = function() { doForward(username); };
+            targets.appendChild(btn);
+        });
+    });
+}
+
+function closeForwardModal() {
+    var modal = document.getElementById('forward-modal');
+    if (modal) modal.classList.remove('visible');
+    forwardMsgId = null;
+}
+
+function doForward(username) {
+    if (!forwardMsgId || !username) return;
+    fetch('/profile/' + username).then(function(r) { return r.text(); }).then(function() {
+        // нужен user_id — получаем через API
+        return fetch('/api/user/id?username=' + encodeURIComponent(username));
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.id) throw new Error('no id');
+        return fetch('/chat/' + forwardMsgId + '/forward', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' },
+            body: JSON.stringify({ to_user_id: data.id })
+        });
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            window.flashToast && window.flashToast('Переслано ✓');
+            closeForwardModal();
+        } else {
+            window.flashToast && window.flashToast(d.error || 'Ошибка');
+        }
+    }).catch(function() {
+        window.flashToast && window.flashToast('Не удалось переслать');
+    });
+}
+
+// ===== ЗАКРЕП СООБЩЕНИЯ =====
+function togglePinMessage(mid, btn) {
+    fetch('/chat/' + mid + '/pin', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' }
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            window.flashToast && window.flashToast(d.pinned ? 'Закреплено 📌' : 'Откреплено');
+            if (d.pinned) {
+                location.reload(); // перезагружаем чтобы показать pinned-bar
+            }
+        }
+    });
+}
+
+// ===== ВСПОМОГАТЕЛЬНЫЕ =====
+function updateSendBtn() {
+    var inp = document.getElementById('chat-input');
+    var btn = document.getElementById('chat-send-btn');
+    if (!inp || !btn) return;
+    btn.disabled = !inp.value.trim();
+}
+
+function scrollToMessage(mid) {
+    var el = document.getElementById('msg-' + mid);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'background 0.3s';
+        el.style.background = 'var(--accent-soft)';
+        setTimeout(function() { el.style.background = ''; }, 1200);
+    }
+}
+
+// Фильтр списка чатов
+document.addEventListener('input', function(e) {
+    if (e.target && e.target.id === 'chat-list-filter') {
+        var q = e.target.value.toLowerCase();
+        document.querySelectorAll('#chat-list .chat-list-item').forEach(function(item) {
+            var name = item.getAttribute('data-name') || '';
+            item.style.display = name.indexOf(q) >= 0 ? '' : 'none';
+        });
+    }
+});
 
 // автоисчезновение flash сообщений
 document.addEventListener('DOMContentLoaded', () => {
@@ -2303,3 +2500,107 @@ if ('serviceWorker' in navigator) {
 }
 
 
+// ===== МУЗЫКА В ПРОФИЛЕ =====
+let profileAudio = null;
+let musicProgressTimer = null;
+
+function toggleProfileMusic() {
+    var audio = document.getElementById('profile-audio');
+    var cover = document.querySelector('.music-cover');
+    var icon = document.getElementById('music-play-icon');
+    if (!audio) return;
+    profileAudio = audio;
+
+    if (audio.paused) {
+        audio.play();
+        cover.classList.add('playing');
+        icon.innerHTML = '<use href="#i-pause"/>';
+        startMusicProgress();
+    } else {
+        audio.pause();
+        cover.classList.remove('playing');
+        icon.innerHTML = '<use href="#i-play"/>';
+        stopMusicProgress();
+    }
+
+    audio.onended = function() {
+        cover.classList.remove('playing');
+        icon.innerHTML = '<use href="#i-play"/>';
+        document.getElementById('music-progress').style.width = '0%';
+        document.getElementById('music-current').textContent = '0:00';
+        stopMusicProgress();
+    };
+
+    audio.onloadedmetadata = function() {
+        document.getElementById('music-duration').textContent = formatMusicTime(audio.duration);
+    };
+}
+
+function startMusicProgress() {
+    stopMusicProgress();
+    musicProgressTimer = setInterval(function() {
+        var audio = document.getElementById('profile-audio');
+        if (!audio || audio.paused) return;
+        var pct = (audio.currentTime / audio.duration) * 100;
+        document.getElementById('music-progress').style.width = pct + '%';
+        document.getElementById('music-current').textContent = formatMusicTime(audio.currentTime);
+    }, 200);
+}
+
+function stopMusicProgress() {
+    if (musicProgressTimer) { clearInterval(musicProgressTimer); musicProgressTimer = null; }
+}
+
+function seekProfileMusic(e) {
+    var audio = document.getElementById('profile-audio');
+    if (!audio || !audio.duration) return;
+    var wrap = e.currentTarget;
+    var rect = wrap.getBoundingClientRect();
+    var pct = (e.clientX - rect.left) / rect.width;
+    audio.currentTime = pct * audio.duration;
+}
+
+function formatMusicTime(sec) {
+    if (!sec || isNaN(sec)) return '0:00';
+    var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    return m + ':' + String(s).padStart(2, '0');
+}
+
+function uploadProfileMusic(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    if (file.size > 10 * 1024 * 1024) {
+        window.flashToast && window.flashToast('Максимальный размер 10 МБ');
+        return;
+    }
+    var formData = new FormData();
+    formData.append('music', file);
+    formData.append('title', file.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ').slice(0, 80));
+    fetch('/profile/music/upload', {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' }
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            window.flashToast && window.flashToast('Музыка добавлена 🎵');
+            location.reload();
+        } else {
+            window.flashToast && window.flashToast(d.error || 'Ошибка загрузки');
+        }
+    }).catch(function() {
+        window.flashToast && window.flashToast('Ошибка сети');
+    });
+}
+
+function removeProfileMusic() {
+    if (!confirm('Убрать музыку из профиля?')) return;
+    fetch('/profile/music/remove', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' }
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            window.flashToast && window.flashToast('Музыка удалена');
+            location.reload();
+        }
+    });
+}
