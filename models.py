@@ -445,6 +445,19 @@ def migrate_db():
         if col not in msg_cols:
             conn.execute(f'ALTER TABLE messages ADD COLUMN {col} {typedef}')
 
+    # Таблица push-подписок (Этап 3b — Web Push VAPID)
+    if 'push_subscriptions' not in tables:
+        conn.execute('''CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            endpoint TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, endpoint),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+
     # === Индексы для производительности (IF NOT EXISTS — идемпотентно) ===
     conn.executescript('''
         CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
@@ -1515,3 +1528,36 @@ class StoryView:
                WHERE sv.story_id = ? ORDER BY sv.viewed_at DESC""",
             (story_id,)
         ).fetchall()
+
+
+class PushSubscription:
+    """Web Push подписки (VAPID)."""
+
+    @staticmethod
+    def subscribe(user_id, endpoint, p256dh, auth):
+        db = get_db()
+        try:
+            db.execute('''INSERT OR IGNORE INTO push_subscriptions
+                          (user_id, endpoint, p256dh, auth)
+                          VALUES (?, ?, ?, ?)''', (user_id, endpoint, p256dh, auth))
+            db.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def get_by_user(user_id):
+        db = get_db()
+        return db.execute('SELECT * FROM push_subscriptions WHERE user_id=?', (user_id,)).fetchall()
+
+    @staticmethod
+    def delete(user_id, endpoint):
+        db = get_db()
+        db.execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?', (user_id, endpoint))
+        db.commit()
+
+    @staticmethod
+    def delete_by_endpoint(endpoint):
+        """Удаляет подписку если сервер push вернул 410/404."""
+        db = get_db()
+        db.execute('DELETE FROM push_subscriptions WHERE endpoint=?', (endpoint,))
+        db.commit()

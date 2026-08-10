@@ -2207,10 +2207,73 @@ function _removeVoiceParticipantEl(userId) {
                 if (btn) { btn.textContent = 'Включено ✓'; btn.disabled = true; btn.classList.add('btn-primary'); }
                 window.flashToast && window.flashToast('Push-уведомления включены');
                 window.ZSNotifications.show('ZSocial', 'Уведомления включены!', '/feed');
+                // Подписываемся через Web Push (VAPID) для серверных уведомений
+                subscribeWebPush();
             } else if (perm === 'denied') {
                 if (btn) { btn.textContent = 'Заблокировано'; btn.disabled = true; }
                 window.flashToast && window.flashToast('Уведомления заблокированы в настройках браузера');
             }
+        });
+    };
+
+    // ===== Web Push (VAPID) подписка =====
+    function urlBase64ToUint8Array(base64String) {
+        var padding = '='.repeat((4 - base64String.length % 4) % 4);
+        var base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+        var raw = window.atob(base64);
+        var output = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
+        return output;
+    }
+
+    window.subscribeWebPush = function () {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            console.log('[push] Push API не поддерживается');
+            return;
+        }
+        navigator.serviceWorker.ready.then(function (reg) {
+            // Получаем публичный VAPID ключ с сервера
+            fetch('/api/vapid-public').then(function (r) { return r.json(); }).then(function (data) {
+                if (!data.publicKey) {
+                    console.log('[push] VAPID ключ недоступен');
+                    return;
+                }
+                reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(data.publicKey)
+                }).then(function (sub) {
+                    // Отправляем подписку на сервер
+                    return fetch('/push/subscribe', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
+                        },
+                        body: JSON.stringify(sub.toJSON ? sub.toJSON() : sub)
+                    });
+                }).then(function (r) {
+                    if (r && r.ok) console.log('[push] Подписка сохранена на сервере');
+                    else console.log('[push] Ошибка сохранения подписки');
+                }).catch(function (err) {
+                    console.error('[push] Подписка не удалась:', err);
+                });
+            }).catch(function (err) { console.error('[push] Не удалось получить VAPID ключ:', err); });
+        });
+    };
+
+    window.unsubscribeWebPush = function () {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.ready.then(function (reg) {
+            reg.pushManager.getSubscription().then(function (sub) {
+                if (sub) {
+                    fetch('/push/unsubscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ endpoint: sub.endpoint })
+                    });
+                    sub.unsubscribe();
+                }
+            });
         });
     };
 

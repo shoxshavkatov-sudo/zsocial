@@ -42,3 +42,35 @@ class Config:
         # Документы
         'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'zip', 'rar',
     }
+
+    # VAPID для Web Push: ключи генерируются один раз и хранятся в файле
+    VAPID_PRIVATE_KEY_PATH = os.path.join(_data_dir, '.vapid_private')
+    VAPID_PUBLIC_KEY_PATH = os.path.join(_data_dir, '.vapid_public')
+    VAPID_SUBJECT = os.environ.get('VAPID_SUBJECT', 'mailto:admin@zsocial.app')
+
+    @classmethod
+    def ensure_vapid_keys(cls):
+        """Генерирует VAPID ключи при первом запуске, возвращает (private_pem, public_b64url)."""
+        if os.path.exists(cls.VAPID_PRIVATE_KEY_PATH) and os.path.exists(cls.VAPID_PUBLIC_KEY_PATH):
+            with open(cls.VAPID_PRIVATE_KEY_PATH, 'rb') as f:
+                priv = f.read()
+            with open(cls.VAPID_PUBLIC_KEY_PATH) as f:
+                pub = f.read().strip()
+            return priv, pub
+        from py_vapid import Vapid
+        from cryptography.hazmat.primitives import serialization
+        import base64
+        vapid = Vapid()
+        vapid.generate_keys()
+        priv_pem = vapid.private_pem()  # bytes
+        # Публичный ключ → uncompressed point → base64url
+        pub_bytes = vapid.public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        pub_b64 = base64.urlsafe_b64encode(pub_bytes).decode().rstrip('=')
+        with open(cls.VAPID_PRIVATE_KEY_PATH, 'wb') as f:
+            f.write(priv_pem)
+        with open(cls.VAPID_PUBLIC_KEY_PATH, 'w') as f:
+            f.write(pub_b64)
+        return priv_pem, pub_b64

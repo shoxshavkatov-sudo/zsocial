@@ -20,7 +20,7 @@ from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     is_online,
     User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings,
-    GroupMessage, VoiceRoom, Story, StoryView
+    GroupMessage, VoiceRoom, Story, StoryView, PushSubscription
 )
 import mailer
 
@@ -115,6 +115,65 @@ else:
         if os.path.isfile(_p):
             _mtime = max(_mtime, int(os.path.getmtime(_p)))
     APP_VERSION = str(_mtime or int(_t.time()))
+
+
+# ==================== WEB PUSH (VAPID) ====================
+# Генерируем ключи один раз при старте (если ещё не созданы).
+try:
+    VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY = Config.ensure_vapid_keys()
+except Exception as e:
+    print(f'[push] VAPID key generation failed: {e}')
+    VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY = None, None
+
+
+def send_push(user_id, title, body, url='/feed'):
+    """Отправляет Web Push всем подпискам пользователя (если он офлайн).
+    Вызывается в отдельном потоке, поэтому создаёт app context."""
+    if not VAPID_PRIVATE_KEY:
+        return
+    with app.app_context():
+        subs = PushSubscription.get_by_user(user_id)
+        if not subs:
+            return
+        try:
+            from pywebpush import webpush, WebPushException
+        except ImportError:
+            return
+        import json as _json
+        payload = _json.dumps({'title': title, 'body': body, 'url': url})
+        dead = []
+        for sub in subs:
+            try:
+                webpush(
+                    subscription_info={
+                        'endpoint': sub['endpoint'],
+                        'keys': {'p256dh': sub['p256dh'], 'auth': sub['auth']},
+                    },
+                    data=payload,
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims={'sub': Config.VAPID_SUBJECT},
+                )
+            except WebPushException as ex:
+                # 410 Gone / 404 — подписка больше не валидна
+                if ex.response is not None and ex.response.status_code in (404, 410):
+                    dead.append(sub['endpoint'])
+                else:
+                    print(f'[push] error: {ex}')
+            except Exception as ex:
+                print(f'[push] unexpected: {ex}')
+        for ep in dead:
+            PushSubscription.delete_by_endpoint(ep)
+
+
+@app.route('/api/vapid-public')
+def vapid_public_key():
+    """Возвращает публичный VAPID ключ (base64url) для подписки в браузере."""
+    if not VAPID_PUBLIC_KEY:
+        return jsonify({'error': 'VAPID не настроен'}), 500
+    return jsonify({'publicKey': VAPID_PUBLIC_KEY})
+
+
+
 
 
 @app.after_request
@@ -411,6 +470,36 @@ def logout():
     return redirect(url_for('login'))
 
 
+# ==================== WEB PUSH ПОДПИСКИ ====================
+@app.route('/push/subscribe', methods=['POST'])
+@login_required
+def push_subscribe():
+    """Сохраняет подписку браузера (endpoint + ключи) для текущего пользователя."""
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get('endpoint')
+    p256dh = data.get('keys', {}).get('p256dh')
+    auth = data.get('keys', {}).get('auth')
+    if not (endpoint and p256dh and auth):
+        return jsonify({'error': 'Неполные данные'}), 400
+    PushSubscription.subscribe(session['user_id'], endpoint, p256dh, auth)
+    return jsonify({'ok': True})
+
+
+@app.route('/push/unsubscribe', methods=['POST'])
+@login_required
+def push_unsubscribe():
+    """Удаляет подписку (например, при отключении в настройках)."""
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get('endpoint')
+    if endpoint:
+        PushSubscription.delete(session['user_id'], endpoint)
+    else:
+        db = get_db()
+        db.execute('DELETE FROM push_subscriptions WHERE user_id=?', (session['user_id'],))
+        db.commit()
+    return jsonify({'ok': True})
+
+
 # ==================== ЛЕНТА ====================
 @app.route('/feed')
 @login_required
@@ -539,6 +628,15 @@ def toggle_like(pid):
         if owner and owner['email_notifs'] and owner['id'] != session['user_id']:
             actor = current_user()
             mailer.notify_like(owner['email'], actor['display_name'] or actor['username'], (post['content'] or '')[:80])
+        # Web Push если получатель офлайн
+        if owner and owner['id'] != session['user_id'] and not is_online(owner):
+            actor = current_user()
+            import threading
+            threading.Thread(target=send_push, args=(
+                owner['id'], 'ZSocial',
+                f'{actor["display_name"] or actor["username"]} оценил(а) ваш пост',
+                url_for('feed', _external=False)
+            ), daemon=True).start()
     return jsonify({'liked': liked, 'count': Like.count(pid)})
 
 
@@ -580,6 +678,15 @@ def add_comment(pid):
     if owner and owner['email_notifs'] and owner['id'] != session['user_id']:
         actor = current_user()
         mailer.notify_comment(owner['email'], actor['display_name'] or actor['username'], (post['content'] or '')[:80])
+    # Web Push если владелец поста офлайн
+    if owner and owner['id'] != session['user_id'] and not is_online(owner):
+        actor = current_user()
+        import threading
+        threading.Thread(target=send_push, args=(
+            owner['id'], 'ZSocial',
+            f'{actor["display_name"] or actor["username"]} прокомментировал(а) ваш пост',
+            url_for('feed', _external=False)
+        ), daemon=True).start()
     return jsonify({
         'id': c['id'], 'content': c['content'], 'username': c['username'],
         'avatar': c['avatar'], 'avatar_url': _media_for(c['avatar']),
@@ -854,6 +961,15 @@ def toggle_follow(uid):
         if target and target['email_notifs']:
             actor = current_user()
             mailer.notify_follow(target['email'], actor['display_name'] or actor['username'])
+        # Web Push если цель офлайн
+        if target and not is_online(target):
+            actor = current_user()
+            import threading
+            threading.Thread(target=send_push, args=(
+                uid, 'ZSocial',
+                f'У вас новый подписчик: {actor["display_name"] or actor["username"]}',
+                url_for('profile', username=actor['username'], _external=False)
+            ), daemon=True).start()
     return jsonify({'following': f, 'count': Follow.followers_count(uid)})
 
 
@@ -986,6 +1102,15 @@ def send_message():
             data['reply_to_content'] = rm['content'][:80]
     socketio.emit('new_message', data, room=f'user_{rid}')
     socketio.emit('new_message', data, room=f'user_{u["id"]}')
+    # Web Push получателю если он офлайн
+    receiver = User.get(rid)
+    if receiver and rid != u['id'] and not is_online(receiver):
+        import threading
+        threading.Thread(target=send_push, args=(
+            rid, f'{u["display_name"] or u["username"]}',
+            (content or 'Новое сообщение')[:100],
+            url_for('chat', partner_id=u['id'], _external=False)
+        ), daemon=True).start()
     return jsonify(data)
 
 

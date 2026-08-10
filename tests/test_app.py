@@ -439,3 +439,67 @@ class TestPWA:
         r = client.get('/sw.js')
         assert r.status_code == 200
         assert b'ServiceWorker' in r.data or b'serviceWorker' in r.data or b'cache' in r.data
+
+
+# ==================== WEB PUSH (VAPID) ====================
+
+class TestWebPush:
+    def test_vapid_public_key_endpoint(self, client):
+        """Публичный VAPID ключ доступен без авторизации."""
+        r = client.get('/api/vapid-public')
+        assert r.status_code == 200
+        data = r.get_json()
+        assert 'publicKey' in data
+        assert len(data['publicKey']) > 50
+
+    def test_subscribe_requires_auth(self, client):
+        """Push подписка требует авторизации."""
+        r = client.post('/push/subscribe', json={
+            'endpoint': 'https://fcm.googleapis.com/test',
+            'keys': {'p256dh': 'abc', 'auth': 'def'},
+        })
+        assert r.status_code == 302  # редирект на логин
+
+    def test_subscribe_and_persist(self, app):
+        """Авторизованный пользователь может подписаться."""
+        client = auth_client(app, username='pusher')
+        r = client.post('/push/subscribe', json={
+            'endpoint': 'https://fcm.googleapis.com/test123',
+            'keys': {'p256dh': 'p256key', 'auth': 'authkey'},
+        })
+        assert r.status_code == 200
+        assert r.get_json()['ok'] is True
+        # Проверяем что подписка в БД
+        with app.app_context():
+            from models import PushSubscription, User
+            u = User.get_by_username('pusher')
+            subs = PushSubscription.get_by_user(u['id'])
+            assert len(subs) >= 1
+            assert subs[0]['endpoint'] == 'https://fcm.googleapis.com/test123'
+
+    def test_unsubscribe(self, app):
+        """Удаление подписки."""
+        client = auth_client(app, username='pusher2')
+        client.post('/push/subscribe', json={
+            'endpoint': 'https://fcm.googleapis.com/test456',
+            'keys': {'p256dh': 'k1', 'auth': 'k2'},
+        })
+        r = client.post('/push/unsubscribe', json={
+            'endpoint': 'https://fcm.googleapis.com/test456',
+        })
+        assert r.status_code == 200
+        assert r.get_json()['ok'] is True
+
+    def test_duplicate_subscribe_idempotent(self, app):
+        """Повторная подписка с тем же endpoint не дублирует запись."""
+        client = auth_client(app, username='pusher3')
+        for _ in range(3):
+            client.post('/push/subscribe', json={
+                'endpoint': 'https://example.com/push/same',
+                'keys': {'p256dh': 'a', 'auth': 'b'},
+            })
+        with app.app_context():
+            from models import PushSubscription, get_db
+            db = get_db()
+            count = db.execute("SELECT COUNT(*) c FROM push_subscriptions WHERE endpoint='https://example.com/push/same'").fetchone()['c']
+            assert count == 1

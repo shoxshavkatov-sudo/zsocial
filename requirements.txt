@@ -6,6 +6,7 @@ Werkzeug>=3.0.1
 gunicorn>=21.2.0
 gevent>=23.9.1
 gevent-websocket>=0.10.1
+pywebpush>=2.0
 
 # Dev / test
 pytest>=8.0
