@@ -378,6 +378,42 @@ app.jinja_env.filters['time_ago'] = time_ago
 app.jinja_env.filters['render_text'] = render_text_content
 
 
+@app.template_filter('time_ago_short')
+def time_ago_short(dt):
+    """Короткий формат времени для чата: ЧЧ:ММ или 'вчера' или дата."""
+    if not dt:
+        return ''
+    from datetime import datetime, date as date_cls
+    try:
+        d = datetime.strptime(str(dt)[:19], '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        return str(dt)
+    today = date_cls.today()
+    if d.date() == today:
+        return d.strftime('%H:%M')
+    elif d.date().replace(day=d.day - 1) == today if d.day > 1 else False:
+        return 'вчера'
+    return d.strftime('%d.%m.%y')
+
+
+@app.template_filter('msg_date_label')
+def msg_date_label(dt):
+    """Метка для date-разделителя: 'Сегодня', 'Вчера' или дата."""
+    if not dt:
+        return ''
+    from datetime import datetime, date as date_cls, timedelta
+    try:
+        d = datetime.strptime(str(dt)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return str(dt)[:10]
+    today = date_cls.today()
+    if d == today:
+        return 'Сегодня'
+    if d == today - timedelta(days=1):
+        return 'Вчера'
+    return d.strftime('%d %B').lstrip('0')
+
+
 @app.template_filter('urlize_message')
 def urlize_message(text):
     """Экранирует текст и делает URL кликабельными (для чата)."""

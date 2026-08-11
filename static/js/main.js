@@ -564,6 +564,17 @@ function renderReactions(mid, reactions) {
 
 function renderMessageHTML(data, isMine) {
     const t = data.msg_type || 'text';
+    // Meta: time + checks (inside bubble)
+    let checkHTML = '';
+    if (isMine) {
+        const checks = data.is_read
+            ? '<svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg><svg class="icon" style="width:14px;height:14px;margin-left:-10px"><use href="#i-check"/></svg>'
+            : '<svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg>';
+        checkHTML = `<span class="msg-checks ${data.is_read ? 'read' : 'unread'}">${checks}</span>`;
+    }
+    const editedLabel = data.edited_at ? '<span class="msg-edited-label">ред.</span> ' : '';
+    const meta = `<span class="msg-meta">${editedLabel}${data.time || ''} ${checkHTML}</span>`;
+
     // Forward label
     let forwardHTML = '';
     if (data.forwarded_from_name) {
@@ -572,41 +583,50 @@ function renderMessageHTML(data, isMine) {
     // Reply quote
     let replyHTML = '';
     if (data.reply_to_content) {
-        replyHTML = `<div class="reply-quote"><svg class="icon icon-sm reply-icon"><use href="#i-reply"/></svg><span class="reply-quote-text">${esc(data.reply_to_content)}</span></div>`;
+        replyHTML = `<div class="reply-quote" onclick="scrollToMessage(${data.reply_to_id})"><strong>${esc(data.reply_to_username || 'Сообщение')}</strong>${esc(data.reply_to_content)}</div>`;
     }
-    let inner = '';
+
+    if (t === 'image' && data.file_url_full) {
+        return `<img src="${data.file_url_full}" class="msg-image" onclick="window.open('${data.file_url_full}')">` +
+               `<div class="msg-bubble">${meta}</div>`;
+    }
+    if (t === 'video' && data.file_url_full) {
+        return `<video src="${data.file_url_full}" class="msg-video" controls></video>` +
+               `<div class="msg-bubble">${meta}</div>`;
+    }
+
+    let content = '';
     if (t === 'audio' && data.file_url_full) {
-        inner = `<div class="msg-bubble voice-msg">
+        content = `<div class="voice-msg-inline">
             <button class="voice-play-btn" onclick="playVoice(this)" data-src="${data.file_url_full}"><svg class="icon"><use href="#i-play"/></svg></button>
             <div class="voice-waveform">${Array.from({length:20},(_,i)=>`<div class="wave-bar" style="height:${i%3===0?100:i%2===0?60:40}%;animation-delay:${i*0.05}s"></div>`).join('')}</div>
             <span class="voice-duration">${fmtDuration(data.duration||0)}</span>
             <audio src="${data.file_url_full}" preload="none"></audio>
         </div>`;
-    } else if (t === 'image' && data.file_url_full) {
-        inner = `<img src="${data.file_url_full}" class="msg-image" onclick="window.open('${data.file_url_full}')">`;
-    } else if (t === 'video' && data.file_url_full) {
-        inner = `<video src="${data.file_url_full}" class="msg-video" controls></video>`;
     } else if (t === 'file' && data.file_url_full) {
-        inner = `<div class="msg-bubble msg-file">
+        content = `<div class="msg-file">
             <div class="msg-file-icon"><svg class="icon"><use href="#i-file"/></svg></div>
             <div class="msg-file-info"><div class="msg-file-name">${esc(data.file_name||'Файл')}</div><div class="msg-file-size">${Math.round((data.file_size||0)/1024)} КБ</div></div>
             <a href="${data.file_url_full}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
         </div>`;
     } else {
-        const edited = data.edited_at ? '<span class="msg-edited-label">ред.</span>' : '';
-        inner = `<div class="msg-bubble msg-text-${data.id}" data-original="${esc(data.content)}">${esc(data.content)}${edited}</div>`;
+        content = esc(data.content);
     }
-    // Read check for mine
-    const checkHTML = isMine ? `<span class="msg-check ${data.is_read ? 'read' : 'unread'}"><svg class="icon"><use href="#i-check"/></svg><svg class="icon"><use href="#i-check"/></svg></span>` : '';
-    return forwardHTML + replyHTML + inner + `<div class="msg-time">${data.time} ${checkHTML}</div>`;
+    return `<div class="msg-bubble msg-text-${data.id}" data-original="${esc(data.content)}">${forwardHTML}${replyHTML}${content}${meta}</div>`;
 }
 
 function appendMessage(container, data, myId) {
     const isMine = data.sender_id === myId;
+    // Check if should group with previous message
+    const msgs = container.querySelectorAll('.msg');
+    const lastMsg = msgs[msgs.length - 1];
+    const grouped = lastMsg && lastMsg.classList.contains(isMine ? 'mine' : 'theirs') &&
+                    !lastMsg.querySelector('.msg-date-sep');
     const div = document.createElement('div');
-    div.className = 'msg ' + (isMine ? 'mine' : 'theirs');
+    div.className = 'msg ' + (isMine ? 'mine' : 'theirs') + (grouped ? ' grouped' : '');
     div.id = 'msg-' + data.id;
-    // Actions bar: reply + forward + pin always, edit/delete only mine
+    div.setAttribute('data-msg-id', data.id);
+    // Actions bar
     const isText = (data.msg_type || 'text') === 'text';
     let actions = `<div class="msg-actions-bar">
         <button onclick="showReactionPicker(${data.id}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
@@ -724,8 +744,15 @@ function sendMessage(partnerId) {
     fetch('/chat/send', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
-            if (!d.error) { inp.value = ''; cancelReply(); }
+            if (!d.error) { inp.value = ''; autoResizeChatInput(inp); cancelReply(); }
         });
+}
+
+// Auto-resize textarea
+function autoResizeChatInput(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
 // ===== ЭМОДЗИ-ПИКЕР =====
@@ -806,6 +833,7 @@ function insertEmoji(emoji) {
     inp.value = inp.value.slice(0, start) + emoji + inp.value.slice(end);
     inp.focus();
     inp.selectionStart = inp.selectionEnd = start + emoji.length;
+    autoResizeChatInput(inp);
     updateSendBtn();
 }
 

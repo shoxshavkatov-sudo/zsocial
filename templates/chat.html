@@ -89,38 +89,44 @@
 
         <div class="chat-messages" id="chat-messages" data-me="{{ cu.id }}" data-partner="{{ partner.id }}">
             {% if messages %}
+                {% set ns = namespace(last_date='', last_sender=0) %}
                 {% for m in messages %}
-                <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %}" id="msg-{{ m.id }}" data-msg-id="{{ m.id }}">
-                    {% if m.sender_id == cu.id %}
+                    {% set m_date = (m.created_at[:10] if m.created_at else '') %}
+                    {% if m_date != ns.last_date %}
+                        {% set ns.last_date = m_date %}
+                        <div class="msg-date-sep">{{ m.created_at|msg_date_label }}</div>
+                        {% set ns.last_sender = 0 %}
+                    {% endif %}
+                    {% set grouped = (m.sender_id == ns.last_sender) %}
+                    {% set ns.last_sender = m.sender_id %}
+                <div class="msg {% if m.sender_id == cu.id %}mine{% else %}theirs{% endif %} {% if grouped %}grouped{% endif %}" id="msg-{{ m.id }}" data-msg-id="{{ m.id }}">
                     <div class="msg-actions-bar">
                         <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
                         <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
                         <button onclick="openForwardModal({{ m.id }})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
                         <button onclick="togglePinMessage({{ m.id }}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>
-                        {% if m.msg_type == 'text' %}
+                        {% if m.sender_id == cu.id and m.msg_type == 'text' %}
                         <button onclick="editMsg({{ m.id }})" title="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"/></svg></button>
                         <button onclick="deleteMsg({{ m.id }})" title="Удалить"><svg class="icon icon-sm"><use href="#i-trash"/></svg></button>
                         {% endif %}
                     </div>
+                    {% if m.msg_type == 'image' and m.file_url %}
+                    <img src="{{ media_url(m.file_url) }}" class="msg-image" onclick="window.open('{{ media_url(m.file_url) }}')">
+                    {% elif m.msg_type == 'video' and m.file_url %}
+                    <video src="{{ media_url(m.file_url) }}" class="msg-video" controls></video>
                     {% else %}
-                    <div class="msg-actions-bar">
-                        <button onclick="showReactionPicker({{ m.id }}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
-                        <button onclick="replyToMsg({{ m.id }})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
-                        <button onclick="openForwardModal({{ m.id }})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
-                        <button onclick="togglePinMessage({{ m.id }}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>
-                    </div>
-                    {% endif %}
-                    {% if m.forwarded_from_name %}
-                    <div class="forward-label"><svg class="icon icon-sm"><use href="#i-share"/></svg> Переслано от <strong>{{ m.forwarded_from_name }}</strong></div>
-                    {% endif %}
-                    {% if m.reply_to_content %}
-                        <div class="reply-quote">
-                            <svg class="icon icon-sm reply-icon"><use href="#i-reply"/></svg>
-                            <span class="reply-quote-text">{{ m.reply_to_username|default('') }}: {{ m.reply_to_content[:80] }}</span>
+                    <div class="msg-bubble msg-text-{{ m.id }}" data-original="{{ m.content|e }}">
+                        {% if m.forwarded_from_name %}
+                        <div class="forward-label"><svg class="icon icon-sm"><use href="#i-share"/></svg> Переслано от <strong>{{ m.forwarded_from_name }}</strong></div>
+                        {% endif %}
+                        {% if m.reply_to_content %}
+                        <div class="reply-quote" onclick="scrollToMessage({{ m.reply_to_id }})">
+                            <strong>{{ m.reply_to_username|default('Сообщение') }}</strong>
+                            {{ m.reply_to_content[:80] }}
                         </div>
-                    {% endif %}
-                    {% if m.msg_type == 'audio' %}
-                        <div class="msg-bubble voice-msg">
+                        {% endif %}
+                        {% if m.msg_type == 'audio' %}
+                        <div class="voice-msg-inline">
                             <button class="voice-play-btn" onclick="playVoice(this)" data-src="{{ media_url(m.file_url) if m.file_url else '' }}">
                                 <svg class="icon"><use href="#i-play"/></svg>
                             </button>
@@ -130,35 +136,34 @@
                             <span class="voice-duration">{{ '%02d:%02d'|format((m.duration or 0)//60, (m.duration or 0)%60) }}</span>
                             <audio src="{{ media_url(m.file_url) if m.file_url else '' }}" preload="none"></audio>
                         </div>
-                    {% elif m.msg_type == 'image' and m.file_url %}
-                        <img src="{{ media_url(m.file_url) }}" class="msg-image" onclick="window.open('{{ media_url(m.file_url) }}')">
-                    {% elif m.msg_type == 'video' and m.file_url %}
-                        <video src="{{ media_url(m.file_url) }}" class="msg-video" controls></video>
-                    {% elif m.msg_type == 'file' and m.file_url %}
-                        <div class="msg-bubble msg-file">
+                        {% elif m.msg_type == 'file' and m.file_url %}
+                        <div class="msg-file">
                             <div class="msg-file-icon"><svg class="icon"><use href="#i-file"/></svg></div>
                             <div class="msg-file-info"><div class="msg-file-name">{{ m.file_name or 'Файл' }}</div><div class="msg-file-size">{{ (m.file_size/1024)|round(0) }} КБ</div></div>
                             <a href="{{ media_url(m.file_url) }}" download style="color:inherit"><svg class="icon"><use href="#i-share"/></svg></a>
                         </div>
-                    {% else %}
-                        <div class="msg-bubble msg-text-{{ m.id }}" data-original="{{ m.content|e }}">{{ m.content }}{% if m.edited_at %}<span class="msg-edited-label">ред.</span>{% endif %}</div>
-                    {% endif %}
-                    <div class="msg-time">
-                        {{ m.created_at | time_ago }}
-                        {% if m.sender_id == cu.id %}
-                        <span class="msg-check {{ 'read' if m.is_read else 'unread' }}">
-                            {% if m.is_read %}
-                            <svg class="icon"><use href="#i-check"/></svg><svg class="icon" style="margin-left:-8px"><use href="#i-check"/></svg>
-                            {% else %}
-                            <svg class="icon"><use href="#i-check"/></svg>
+                        {% else %}
+                        {{ m.content|e }}
+                        {% endif %}
+                        <span class="msg-meta">
+                            {% if m.edited_at %}<span class="msg-edited-label">ред.</span> {% endif -%}
+                            {{ m.created_at|time_ago_short }}
+                            {%- if m.sender_id == cu.id %}
+                            <span class="msg-checks {{ 'read' if m.is_read else 'unread' }}">
+                                {% if m.is_read %}
+                                <svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg><svg class="icon" style="width:14px;height:14px;margin-left:-10px"><use href="#i-check"/></svg>
+                                {% else %}
+                                <svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg>
+                                {% endif %}
+                            </span>
                             {% endif %}
                         </span>
-                        {% endif %}
                     </div>
+                    {% endif %}
                     {% if m.reactions %}
                     <div class="msg-reactions">
                         {% for r in m.reactions %}
-                        <span class="msg-reaction"><span class="reaction-emoji">{{ r.emoji }}</span><span class="reaction-count">{{ r.count }}</span></span>
+                        <span class="msg-reaction"><span class="reaction-emoji">{{ r.emoji }}</span>{% if r.count > 1 %}<span class="reaction-count">{{ r.count }}</span>{% endif %}</span>
                         {% endfor %}
                     </div>
                     {% endif %}
@@ -193,7 +198,7 @@
                     <svg class="icon"><use href="#i-paperclip"/></svg>
                 </button>
                 <input type="file" id="file-input" class="hidden" onchange="sendFile({{ partner.id }}, this)">
-                <input id="chat-input" placeholder="Сообщение..." oninput="notifyTyping({{ partner.id }}); updateSendBtn()" onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
+                <textarea id="chat-input" rows="1" placeholder="Сообщение..." oninput="autoResizeChatInput(this); notifyTyping({{ partner.id }}); updateSendBtn()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage({{ partner.id }})}"></textarea>
                 <button class="chat-tool-btn" onclick="toggleEmojiPicker(event)" title="Эмодзи">
                     <svg class="icon"><use href="#i-smile"/></svg>
                 </button>
