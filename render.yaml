@@ -10,9 +10,12 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: "3.11.9"
       - key: RENDER
         value: "true"
+      # Явно указываем persistent disk path
+      - key: RENDER_DATA_DIR
+        value: /opt/render/.data
       # Email (SMTP). Без них mailer работает в no-op режиме — сайт функционирует.
       - key: MAIL_ENABLED
         value: "0"

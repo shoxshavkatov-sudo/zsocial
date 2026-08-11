@@ -500,6 +500,100 @@ def migrate_db():
     conn.close()
 
 
+def backup_db_to_json():
+    """Создаёт JSON-бэкап БД на persistent disk.
+    Вызывается периодически и при деплое чтобы данные пережили потерю disk."""
+    import json
+    try:
+        backup_dir = os.path.join(os.path.dirname(Config.DATABASE), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        conn = sqlite3.connect(Config.DATABASE)
+        conn.row_factory = sqlite3.Row
+        data = {}
+        # Бэкапим основные таблицы с пользовательскими данными
+        tables_to_backup = ['users', 'posts', 'likes', 'comments', 'bookmarks',
+                            'follows', 'messages', 'notifications', 'groups',
+                            'group_members', 'group_messages', 'polls', 'poll_options',
+                            'poll_votes', 'post_views', 'stories', 'story_views',
+                            'message_reactions', 'push_subscriptions']
+        for t in tables_to_backup:
+            try:
+                rows = conn.execute(f'SELECT * FROM "{t}"').fetchall()
+                data[t] = [{k: r[k] for k in r.keys()} for r in rows]
+            except Exception:
+                data[t] = []
+        # settings — только не-секретные
+        try:
+            data['settings'] = [{k: r[k] for k in r.keys()} for r in conn.execute('SELECT * FROM settings').fetchall()]
+        except Exception:
+            data['settings'] = []
+        conn.close()
+        backup_file = os.path.join(backup_dir, 'social_backup.json')
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+        # Также timestamped backup (последние 3)
+        import time
+        ts_backup = os.path.join(backup_dir, f'backup_{int(time.time())}.json')
+        with open(ts_backup, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+        # Чистим старые (оставляем 3)
+        backups = sorted([f for f in os.listdir(backup_dir) if f.startswith('backup_')])
+        for old in backups[:-3]:
+            try:
+                os.remove(os.path.join(backup_dir, old))
+            except OSError:
+                pass
+    except Exception as e:
+        print(f'[backup] error: {e}')
+
+
+def restore_db_from_json():
+    """Восстанавливает БД из JSON-бэкапа если БД пустая.
+    Вызывается при старте если persistent disk потерял social.db."""
+    import json
+    try:
+        # Проверяем есть ли данные в БД
+        conn = sqlite3.connect(Config.DATABASE)
+        user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        if user_count > 0:
+            conn.close()
+            return False  # БД не пустая, restore не нужен
+        conn.close()
+        # Ищем бэкап
+        backup_file = os.path.join(os.path.dirname(Config.DATABASE), 'backups', 'social_backup.json')
+        if not os.path.exists(backup_file):
+            return False
+        with open(backup_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        conn = sqlite3.connect(Config.DATABASE)
+        conn.execute('PRAGMA foreign_keys = OFF')
+        # Восстанавливаем users (кроме admin который мог создаться через seed)
+        for table, rows in data.items():
+            if not rows or table == 'settings':
+                continue
+            # Очищаем и вставляем
+            try:
+                conn.execute(f'DELETE FROM "{table}"')
+            except Exception:
+                continue
+            for row in rows:
+                cols = list(row.keys())
+                placeholders = ','.join(['?'] * len(cols))
+                col_names = ','.join(f'"{c}"' for c in cols)
+                try:
+                    conn.execute(f'INSERT OR IGNORE INTO "{table}" ({col_names}) VALUES ({placeholders})',
+                                 [row[c] for c in cols])
+                except Exception:
+                    pass
+        conn.commit()
+        conn.close()
+        print(f'[restore] БД восстановлена из бэкапа')
+        return True
+    except Exception as e:
+        print(f'[restore] error: {e}')
+        return False
+
+
 # ==================== УТИЛИТЫ ====================
 def is_online(profile_user, threshold_seconds=120):
     """True если пользователь был активен за последние ~2 минуты."""

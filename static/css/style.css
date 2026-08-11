@@ -21,8 +21,12 @@
     --glass-bg: rgba(255,255,255,0.7); --glass-border: rgba(255,255,255,0.5);
     --glass-blur: 24px; --glass-shadow: 0 8px 32px rgba(40,30,80,0.10);
     --verified: #6d5efc;
-    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.10), transparent 60%),
-                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.08), transparent 55%);
+    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.18), transparent 60%),
+                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.14), transparent 55%),
+                 radial-gradient(800px 600px at 50% 100%, rgba(124,108,255,0.10), transparent 60%);
+    --glass-card: rgba(255,255,255,0.55);
+    --glass-card-hover: rgba(255,255,255,0.65);
+    --glass-highlight: rgba(255,255,255,0.25);
 }
 [data-theme="dark"] {
     --bg: #0c0b12; --bg-subtle: #14131c; --bg-muted: #1b1a26; --bg-hover: #24222f;
@@ -42,8 +46,12 @@
     --glass-bg: rgba(22,21,31,0.72); --glass-border: rgba(255,255,255,0.08);
     --glass-blur: 24px; --glass-shadow: 0 8px 32px rgba(0,0,0,0.55);
     --verified: #8b7cff;
-    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.12), transparent 60%),
-                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.10), transparent 55%);
+    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.22), transparent 60%),
+                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.18), transparent 55%),
+                 radial-gradient(800px 600px at 50% 100%, rgba(124,108,255,0.14), transparent 60%);
+    --glass-card: rgba(30,28,42,0.55);
+    --glass-card-hover: rgba(36,34,50,0.65);
+    --glass-highlight: rgba(255,255,255,0.06);
 }
 /* Чёрная (OLED/AMOLED) тема — чистый чёрный фон для экономии батареи */
 [data-theme="black"] {
@@ -64,8 +72,12 @@
     --glass-bg: rgba(10,10,10,0.78); --glass-border: rgba(255,255,255,0.06);
     --glass-blur: 24px; --glass-shadow: 0 8px 32px rgba(0,0,0,0.8);
     --verified: #9d8eff;
-    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.10), transparent 60%),
-                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.08), transparent 55%);
+    --page-grad: radial-gradient(1200px 600px at 80% -10%, rgba(157,92,255,0.18), transparent 60%),
+                 radial-gradient(900px 500px at -10% 0%, rgba(109,94,252,0.14), transparent 55%),
+                 radial-gradient(800px 600px at 50% 100%, rgba(124,108,255,0.10), transparent 60%);
+    --glass-card: rgba(18,18,22,0.55);
+    --glass-card-hover: rgba(24,24,28,0.65);
+    --glass-highlight: rgba(255,255,255,0.04);
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -629,6 +641,62 @@ textarea.input { resize: vertical; min-height: 80px; }
 .forward-target img { width:42px; height:42px; border-radius:50%; object-fit:cover; }
 .forward-target .name { font-size:15px; font-weight:600; }
 .forward-target .last { font-size:12px; color:var(--text-muted); }
+
+/* ===== ЭМОДЗИ-ПИКЕР ===== */
+.emoji-picker {
+    display:none; position:absolute; bottom:60px; left:12px; z-index:150;
+    width:320px; max-width:calc(100vw - 24px);
+    background: var(--glass-bg); backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border:1px solid var(--glass-border); border-radius:18px;
+    box-shadow: var(--glass-shadow);
+    overflow:hidden;
+}
+.emoji-picker.visible { display:block; animation:slideUp 0.2s ease; }
+.emoji-picker-tabs {
+    display:flex; gap:2px; padding:8px 8px 0; border-bottom:1px solid var(--border);
+    overflow-x:auto; scrollbar-width:none;
+}
+.emoji-picker-tabs::-webkit-scrollbar { display:none; }
+.emoji-picker-tab {
+    flex-shrink:0; padding:6px 10px; border:none; background:none; cursor:pointer;
+    font-size:20px; border-radius:8px 8px 0 0; transition: background 0.12s;
+}
+.emoji-picker-tab.active { background: var(--bg-subtle); }
+.emoji-picker-grid {
+    display:grid; grid-template-columns:repeat(8,1fr); gap:2px;
+    padding:8px; max-height:240px; overflow-y:auto;
+}
+.emoji-picker-grid button {
+    width:100%; aspect-ratio:1; border:none; background:none; cursor:pointer;
+    font-size:22px; border-radius:8px; transition: background 0.1s, transform 0.1s;
+    display:flex; align-items:center; justify-content:center;
+}
+.emoji-picker-grid button:hover { background: var(--bg-subtle); transform:scale(1.2); }
+
+/* ===== SELF-DESTRUCT BADGE ===== */
+.msg-self-destruct {
+    display:inline-flex; align-items:center; gap:3px;
+    font-size:11px; color: var(--text-muted); margin-top:2px;
+}
+.msg-self-destruct svg { width:12px; height:12px; }
+.msg-bubble.expiring { opacity:0.7; }
+
+/* ===== VIDEO CIRCLE (как в TG) ===== */
+.msg-video-circle {
+    width:240px; height:240px; border-radius:50%; object-fit:cover;
+    cursor:pointer; background:var(--bg-muted);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.video-circle-progress {
+    position:absolute; width:240px; height:240px;
+}
+.video-circle-wrap { position:relative; display:inline-block; }
+.video-circle-play-overlay {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    border-radius:50%; background:rgba(0,0,0,0.3); cursor:pointer;
+}
+.video-circle-play-overlay svg { width:48px; height:48px; fill:white; }
 
 /* ===== ЛЮДИ ===== */
 .person-row { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); transition: background 0.15s; }
@@ -1658,5 +1726,404 @@ html.theme-transitioning *::after {
 @media (max-width:560px) {
     .explore-suggest-grid { grid-template-columns:1fr; }
     .explore-groups-grid { grid-template-columns:1fr; }
+}
+
+/* ============================================
+   LIQUID GLASS 2.0 — Глубокий glassmorphism
+   ============================================ */
+
+/* Фон страницы — более насыщенные градиенты для видимости glass */
+body {
+    background: var(--bg);
+    background-image: var(--page-grad);
+    background-attachment: fixed;
+}
+
+/* Плавающие цветовые blob'ы за контентом (декоративные) */
+body::before, body::after {
+    content: ''; position: fixed; z-index: -1; pointer-events: none;
+    border-radius: 50%; filter: blur(80px); opacity: 0.5;
+    animation: floatBlob 20s ease-in-out infinite;
+}
+body::before {
+    width: 400px; height: 400px; top: -100px; right: -100px;
+    background: radial-gradient(circle, rgba(157,92,255,0.3), transparent 70%);
+}
+body::after {
+    width: 350px; height: 350px; bottom: -80px; left: -80px;
+    background: radial-gradient(circle, rgba(109,94,252,0.25), transparent 70%);
+    animation-delay: -10s;
+}
+@keyframes floatBlob {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33% { transform: translate(30px,-40px) scale(1.1); }
+    66% { transform: translate(-20px,30px) scale(0.95); }
+}
+
+/* Glass mixin (переиспользуем через @layer) */
+.glass {
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* === POSTS — теперь glass-карточки с разделителями === */
+.post {
+    background: var(--glass-card);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: 18px;
+    margin: 10px 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+.post:hover {
+    background: var(--glass-card-hover);
+    box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+    transform: translateY(-1px);
+}
+.post-body { padding-left: 52px; }
+.post-image-wrap { padding: 0; margin-left: 52px; border-color: var(--glass-border); }
+.post-stats { padding-left: 52px; }
+.post-actions { padding-left: 44px; }
+
+/* === AUTH CARD — premium glass === */
+.auth-card {
+    background: var(--glass-card);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+.auth-logo .logo-mark {
+    background: var(--accent-grad);
+    box-shadow: var(--shadow-accent);
+}
+
+/* === MODAL — glass overlay === */
+.modal-card {
+    background: var(--glass-card);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+.modal-overlay {
+    background: rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+/* === INPUTS — glass style === */
+.input, input[type="text"], input[type="password"], input[type="email"],
+input[type="search"], textarea.input, select.input {
+    background: var(--glass-card);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--glass-border);
+    transition: all 0.2s;
+}
+.input:focus, input:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    background: var(--glass-card-hover);
+}
+
+/* === BUTTONS — premium glass buttons === */
+.btn {
+    transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+}
+.btn-primary {
+    background: var(--accent-grad);
+    box-shadow: var(--shadow-accent);
+}
+.btn-primary:hover {
+    box-shadow: var(--shadow-accent), 0 0 20px rgba(109,94,252,0.4);
+    transform: translateY(-1px);
+}
+.btn-primary:active { transform: scale(0.97); }
+.btn:not(.btn-primary) {
+    background: var(--glass-card);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--glass-border);
+}
+.btn:not(.btn-primary):hover {
+    background: var(--glass-card-hover);
+}
+
+/* === PROFILE HEADER — glass cover === */
+.profile-header {
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: 0 0 24px 24px;
+    box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* === STORIES — glass circles === */
+.story-item {
+    background: var(--glass-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 2px solid var(--glass-border);
+}
+
+/* === NOTIFICATIONS — glass rows === */
+.notif-item, .person-row {
+    background: var(--glass-card);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    margin: 6px 10px;
+    border-bottom: 1px solid var(--glass-border);
+    transition: all 0.2s;
+}
+.notif-item:hover, .person-row:hover {
+    background: var(--glass-card-hover);
+}
+
+/* === EXPLORE TAGS — glass pills === */
+.explore-tag, .trending-tag {
+    background: var(--glass-card);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    transition: all 0.2s;
+}
+.explore-tag:hover, .trending-tag:hover {
+    background: var(--glass-card-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* === GROUP CARDS — glass === */
+.group-card {
+    background: var(--glass-card);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* === FLASH MESSAGES — glass === */
+.flash {
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+}
+
+/* === SETTINGS — glass panels === */
+.settings-section {
+    background: var(--glass-card);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* === ADMIN PANEL — glass === */
+.admin-card, .admin-section {
+    background: var(--glass-card);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+}
+
+/* === CHAT SEARCH BAR — glass === */
+.chat-search-bar {
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--glass-border);
+}
+
+/* === PINNED BAR — glass === */
+.pinned-bar {
+    background: var(--glass-card);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border-bottom: 1px solid var(--glass-border);
+}
+
+/* === SCROLLBAR — тонкий glass стиль === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--glass-card);
+    backdrop-filter: blur(8px);
+    border-radius: 999px;
+    border: 2px solid transparent;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--accent-soft); }
+
+/* === ANIMATIONS === */
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* === UTILITY: glass shimmer при загрузке === */
+.shimmer {
+    background: linear-gradient(90deg,
+        var(--glass-card) 25%,
+        var(--glass-card-hover) 50%,
+        var(--glass-card) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* === TAP HIGHLIGHT — убираем на мобильных === */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* === SELECTION — accent color === */
+::selection { background: var(--accent-soft); color: var(--accent); }
+
+/* ===== DOUBLE-TAP HEART ANIMATION ===== */
+@keyframes heartPop {
+    0% { transform: scale(0); opacity: 0; }
+    50% { transform: scale(1.3); opacity: 1; }
+    100% { transform: scale(1) translateY(-30px); opacity: 0; }
+}
+
+/* ===== SCROLL-TO-BOTTOM BUTTON ===== */
+.scroll-bottom-btn {
+    position: absolute; bottom: 80px; right: 16px; z-index: 50;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0; pointer-events: none;
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+.scroll-bottom-btn.visible {
+    opacity: 1; pointer-events: auto;
+}
+.scroll-bottom-btn:hover {
+    background: var(--glass-card-hover);
+    transform: translateY(-2px);
+}
+.scroll-bottom-btn .icon { width: 20px; height: 20px; }
+
+/* ===== REACTION PICKER — enhanced glass ===== */
+.reaction-picker {
+    background: var(--glass-card) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    border: 1px solid var(--glass-border) !important;
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight) !important;
+}
+
+/* ===== CHAT INPUT INNER — enhanced glass ===== */
+.chat-input-inner {
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.chat-send-btn {
+    background: var(--accent-grad);
+    box-shadow: var(--shadow-accent);
+    transition: all 0.2s;
+}
+.chat-send-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: var(--shadow-accent), 0 0 16px rgba(109,94,252,0.4);
+}
+.chat-send-btn:disabled { opacity: 0.4; }
+
+/* ===== CHAT TOOL BUTTONS — glass ===== */
+.chat-tool-btn {
+    background: transparent;
+    transition: all 0.15s;
+}
+.chat-tool-btn:hover {
+    background: var(--glass-card-hover);
+    transform: scale(1.1);
+}
+.chat-tool-btn:active { transform: scale(0.9); }
+
+/* ===== CHAT HEAD BUTTONS — glass ===== */
+.chat-head-btn {
+    background: var(--glass-card);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--glass-border);
+    transition: all 0.2s;
+}
+.chat-head-btn:hover {
+    background: var(--glass-card-hover);
+    color: var(--accent);
+}
+
+/* ===== ONLINE DOT — enhanced glow ===== */
+.online-dot {
+    box-shadow: 0 0 0 2px var(--surface), 0 0 8px rgba(16,185,129,0.6);
+}
+.online-dot.pulse {
+    animation: pulseGreen 2s infinite;
+}
+@keyframes pulseGreen {
+    0%,100% { box-shadow: 0 0 0 2px var(--surface), 0 0 8px rgba(16,185,129,0.6); }
+    50% { box-shadow: 0 0 0 2px var(--surface), 0 0 14px rgba(16,185,129,0.9); }
+}
+
+/* ===== MSG BUBBLE — enhanced glass for theirs ===== */
+.msg.theirs .msg-bubble {
+    background: var(--glass-card);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.msg.mine .msg-bubble {
+    box-shadow: var(--shadow-accent), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* ===== MSG ACTIONS BAR — smooth glass ===== */
+.msg-actions-bar {
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.msg:hover .msg-actions-bar { opacity: 1; }
+@media (max-width: 768px) {
+    .msg-actions-bar { opacity: 0.7; }
+}
+
+/* ===== REPLY PREVIEW BAR — glass ===== */
+.reply-preview-bar {
+    background: var(--glass-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--glass-border);
+}
+
+/* ===== TYPING INDICATOR — glass ===== */
+.typing-indicator {
+    background: var(--glass-card);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 

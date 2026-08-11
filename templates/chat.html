@@ -73,7 +73,7 @@
                 <span id="search-count">0</span>
                 <button onclick="navSearch(1)" title="Вперёд">↓</button>
             </div>
-            <button onclick="toggleChatSearch()" title="Закрыть"><svg class="icon"><use href="#i-close"/></svg></button>
+            <button onclick="toggleChatSearch()" title="Закрыть"><svg class="icon"><use href="#i-x"/></svg></button>
         </div>
 
         {# Закреплённое сообщение #}
@@ -194,6 +194,9 @@
                 </button>
                 <input type="file" id="file-input" class="hidden" onchange="sendFile({{ partner.id }}, this)">
                 <input id="chat-input" placeholder="Сообщение..." oninput="notifyTyping({{ partner.id }}); updateSendBtn()" onkeypress="if(event.key==='Enter')sendMessage({{ partner.id }})">
+                <button class="chat-tool-btn" onclick="toggleEmojiPicker(event)" title="Эмодзи">
+                    <svg class="icon"><use href="#i-smile"/></svg>
+                </button>
                 <button class="chat-tool-btn" onclick="document.getElementById('image-input').click()" title="Фото/Видео">
                     <svg class="icon"><use href="#i-image"/></svg>
                 </button>
@@ -203,6 +206,12 @@
                 </button>
             </div>
             <button class="chat-send-btn" id="chat-send-btn" onclick="sendMessage({{ partner.id }})" disabled><svg class="icon"><use href="#i-send"/></svg></button>
+
+            {# Эмодзи-пикер #}
+            <div class="emoji-picker" id="emoji-picker">
+                <div class="emoji-picker-tabs" id="emoji-tabs"></div>
+                <div class="emoji-picker-grid" id="emoji-grid"></div>
+            </div>
         </div>
 
         {# Модалка пересылки #}
@@ -291,6 +300,12 @@
         if (c) c.scrollTop = c.scrollHeight;
         initSocket({{ cu.id }}, {{ partner.id }});
         _registerCallListeners();
+        initScrollBottomBtn();
+        // Attach double-tap & swipe to existing messages
+        document.querySelectorAll('.msg').forEach(function(el) {
+            const mid = el.getAttribute('data-msg-id');
+            if (mid) { attachDoubleTap(el, parseInt(mid)); attachSwipeReply(el, parseInt(mid)); }
+        });
     }, 50);
 </script>
 {% endif %}

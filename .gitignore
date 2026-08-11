@@ -19,5 +19,8 @@ static/uploads/*
 uploads/*
 !uploads/.gitkeep
 
+# Бэкапы БД (на persistent disk)
+backups/*
+
 .DS_Store
 *.log

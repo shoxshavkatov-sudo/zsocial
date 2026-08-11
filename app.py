@@ -19,7 +19,7 @@ import uuid
 from config import Config
 from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
-    is_online,
+    is_online, backup_db_to_json, restore_db_from_json,
     User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings,
     GroupMessage, VoiceRoom, Story, StoryView, PushSubscription
 )
@@ -250,7 +250,28 @@ def _seed_if_empty():
 with app.app_context():
     init_db()
     migrate_db()
-    _seed_if_empty()
+    # Restore из бэкапа если БД пустая (данные потерялись при деплое)
+    restored = restore_db_from_json()
+    if not restored:
+        _seed_if_empty()
+    # Создаём первичный бэкап
+    backup_db_to_json()
+
+
+# Периодический backup каждые 5 минут (фон) — данные переживут деплой
+import threading
+def _periodic_backup():
+    while True:
+        import time as _t
+        _t.sleep(300)
+        try:
+            with app.app_context():
+                backup_db_to_json()
+        except Exception:
+            pass
+
+_backup_thread = threading.Thread(target=_periodic_backup, daemon=True)
+_backup_thread.start()
 
 
 # Гарантия сохранения данных: checkpoint WAL перед завершением процесса.
@@ -262,6 +283,11 @@ def _db_checkpoint_on_exit():
         conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         conn.commit()
         conn.close()
+    except Exception:
+        pass
+    # Финальный бэкап
+    try:
+        backup_db_to_json()
     except Exception:
         pass
 
@@ -1707,6 +1733,29 @@ def ratelimit_handler(e):
         return jsonify({'error': 'Слишком много запросов. Подождите немного.'}), 429
     flash('Слишком много попыток. Подождите минуту.', 'error')
     return redirect(request.referrer or url_for('login'))
+
+
+# ==================== БЭКАП/ВОССТАНОВЛЕНИЕ (админ) ====================
+@app.route('/admin/backup', methods=['POST'])
+@login_required
+def admin_backup_route():
+    """Ручной бэкап БД в JSON (только админ)."""
+    u = current_user()
+    if u['role'] != 'admin':
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    backup_db_to_json()
+    return jsonify({'ok': True, 'msg': 'Бэкап создан'})
+
+
+@app.route('/admin/restore', methods=['POST'])
+@login_required
+def admin_restore_route():
+    """Ручное восстановление из бэкапа (только админ)."""
+    u = current_user()
+    if u['role'] != 'admin':
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    restored = restore_db_from_json()
+    return jsonify({'ok': restored, 'msg': 'Восстановлено' if restored else 'Бэкап не найден или БД не пустая'})
 
 
 # ==================== ЗАПУСК ====================

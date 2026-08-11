@@ -459,7 +459,7 @@ function initSocket(myId, partnerId) {
                 window.ZSNotifications.show(
                     data.sender_username || 'ZSocial',
                     data.content || 'Новое сообщение',
-                    '/chat/' + data.sender_id
+                    '/chat?with=' + encodeURIComponent(data.sender_username || ''),
                 );
             }
         }
@@ -609,6 +609,7 @@ function appendMessage(container, data, myId) {
     // Actions bar: reply + forward + pin always, edit/delete only mine
     const isText = (data.msg_type || 'text') === 'text';
     let actions = `<div class="msg-actions-bar">
+        <button onclick="showReactionPicker(${data.id}, event)" title="Реакция"><svg class="icon icon-sm"><use href="#i-smile"/></svg></button>
         <button onclick="replyToMsg(${data.id})" title="Ответить"><svg class="icon icon-sm"><use href="#i-reply"/></svg></button>
         <button onclick="openForwardModal(${data.id})" title="Переслать"><svg class="icon icon-sm"><use href="#i-share"/></svg></button>
         <button onclick="togglePinMessage(${data.id}, this)" title="Закрепить"><svg class="icon icon-sm"><use href="#i-bookmark"/></svg></button>`;
@@ -617,6 +618,91 @@ function appendMessage(container, data, myId) {
     actions += '</div>';
     div.innerHTML = actions + renderMessageHTML(data, isMine);
     container.appendChild(div);
+    // Double-tap to quick-react ❤️
+    attachDoubleTap(div, data.id);
+    // Swipe-to-reply
+    attachSwipeReply(div, data.id);
+}
+
+// ===== DOUBLE-TAP TO QUICK-REACT ❤️ =====
+function attachDoubleTap(el, mid) {
+    let lastTap = 0;
+    el.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if (now - lastTap < 350) {
+            e.preventDefault();
+            quickReact(mid);
+            // Heart animation
+            const heart = document.createElement('div');
+            heart.textContent = '❤️';
+            heart.style.cssText = 'position:absolute;font-size:40px;pointer-events:none;animation:heartPop 0.6s ease forwards;z-index:10;';
+            const rect = el.getBoundingClientRect();
+            heart.style.left = (rect.width / 2 - 20) + 'px';
+            heart.style.top = (rect.height / 2 - 20) + 'px';
+            el.style.position = 'relative';
+            el.appendChild(heart);
+            setTimeout(() => heart.remove(), 600);
+        }
+        lastTap = now;
+    });
+    el.addEventListener('dblclick', function() { quickReact(mid); });
+}
+
+function quickReact(mid) {
+    fetch('/chat/' + mid + '/react', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({emoji: '❤️'})
+    }).then(r => r.json()).then(d => { if (d.error) flashToast(d.error); });
+}
+
+// ===== SWIPE-TO-REPLY =====
+function attachSwipeReply(el, mid) {
+    let startX = 0, currentX = 0, swiping = false;
+    el.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        swiping = true;
+    }, { passive: true });
+    el.addEventListener('touchmove', function(e) {
+        if (!swiping) return;
+        currentX = e.touches[0].clientX;
+        const dx = currentX - startX;
+        if (dx > 0 && dx < 80) {
+            el.style.transform = 'translateX(' + (dx * 0.5) + 'px)';
+            el.style.transition = 'none';
+        }
+    }, { passive: true });
+    el.addEventListener('touchend', function() {
+        if (!swiping) return;
+        swiping = false;
+        const dx = currentX - startX;
+        el.style.transition = 'transform 0.3s ease';
+        el.style.transform = '';
+        if (dx > 50) replyToMsg(mid);
+    });
+}
+
+// ===== SCROLL-TO-BOTTOM BUTTON =====
+function initScrollBottomBtn() {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    // Create button if not exists
+    let btn = document.getElementById('scroll-bottom-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'scroll-bottom-btn';
+        btn.className = 'scroll-bottom-btn';
+        btn.innerHTML = '<svg class="icon"><use href="#i-arrow-left"/></svg>';
+        btn.style.cssText = 'transform:rotate(-90deg)';
+        btn.onclick = function() {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            btn.classList.remove('visible');
+        };
+        container.parentElement.appendChild(btn);
+    }
+    container.addEventListener('scroll', function() {
+        const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        btn.classList.toggle('visible', !atBottom);
+    });
 }
 
 function fmtDuration(sec) {
@@ -641,6 +727,108 @@ function sendMessage(partnerId) {
             if (!d.error) { inp.value = ''; cancelReply(); }
         });
 }
+
+// ===== ЭМОДЗИ-ПИКЕР =====
+const EMOJI_DATA = {
+    '😀': { cat: 'smileys', name: 'улыбка' },
+    '😂': { cat: 'smileys' }, '🥰': { cat: 'smileys' }, '😍': { cat: 'smileys' },
+    '🤔': { cat: 'smileys' }, '😎': { cat: 'smileys' }, '🥲': { cat: 'smileys' },
+    '😴': { cat: 'smileys' }, '🤯': { cat: 'smileys' }, '🥳': { cat: 'smileys' },
+    '😭': { cat: 'smileys' }, '😡': { cat: 'smileys' }, '🤗': { cat: 'smileys' },
+    '🤩': { cat: 'smileys' }, '😇': { cat: 'smileys' }, '🙃': { cat: 'smileys' },
+    '😘': { cat: 'smileys' }, '🤤': { cat: 'smileys' }, '💀': { cat: 'smileys' },
+    '👍': { cat: 'gestures' }, '👎': { cat: 'gestures' }, '👏': { cat: 'gestures' },
+    '🙏': { cat: 'gestures' }, '💪': { cat: 'gestures' }, '🤝': { cat: 'gestures' },
+    '✌️': { cat: 'gestures' }, '🤞': { cat: 'gestures' }, '👀': { cat: 'gestures' },
+    '💪': { cat: 'gestures' }, '🙌': { cat: 'gestures' }, '👌': { cat: 'gestures' },
+    '❤️': { cat: 'hearts' }, '🧡': { cat: 'hearts' }, '💛': { cat: 'hearts' },
+    '💚': { cat: 'hearts' }, '💙': { cat: 'hearts' }, '💜': { cat: 'hearts' },
+    '🖤': { cat: 'hearts' }, '🤍': { cat: 'hearts' }, '💔': { cat: 'hearts' },
+    '❤️‍🔥': { cat: 'hearts' }, '💖': { cat: 'hearts' }, '💯': { cat: 'hearts' },
+    '🔥': { cat: 'symbols' }, '⭐': { cat: 'symbols' }, '✨': { cat: 'symbols' },
+    '🎉': { cat: 'symbols' }, '🎊': { cat: 'symbols' }, '💥': { cat: 'symbols' },
+    '💫': { cat: 'symbols' }, '⚡': { cat: 'symbols' }, '🌈': { cat: 'symbols' },
+    '☀️': { cat: 'symbols' }, '🌙': { cat: 'symbols' }, '💎': { cat: 'symbols' },
+    '🍕': { cat: 'food' }, '🍔': { cat: 'food' }, '🍟': { cat: 'food' },
+    '🌮': { cat: 'food' }, '🍣': { cat: 'food' }, '🍰': { cat: 'food' },
+    '☕': { cat: 'food' }, '🍺': { cat: 'food' }, '🍷': { cat: 'food' },
+    '🍦': { cat: 'food' }, '🧋': { cat: 'food' }, '🍩': { cat: 'food' },
+    '⚽': { cat: 'activity' }, '🏀': { cat: 'activity' }, '🎮': { cat: 'activity' },
+    '🎵': { cat: 'activity' }, '🎸': { cat: 'activity' }, '🎧': { cat: 'activity' },
+    '🎬': { cat: 'activity' }, '📷': { cat: 'activity' }, '✈️': { cat: 'activity' },
+    '🚗': { cat: 'activity' }, '🏖️': { cat: 'activity' }, '🏔️': { cat: 'activity' },
+};
+const EMOJI_CATEGORIES = {
+    'smileys': '😀', 'gestures': '👍', 'hearts': '❤️',
+    'symbols': '🔥', 'food': '🍕', 'activity': '⚽',
+};
+let emojiPickerBuilt = false;
+let emojiCurrentCat = 'smileys';
+
+function buildEmojiPicker() {
+    const tabsEl = document.getElementById('emoji-tabs');
+    const gridEl = document.getElementById('emoji-grid');
+    if (!tabsEl || !gridEl) return;
+    // Tabs
+    tabsEl.innerHTML = '';
+    Object.entries(EMOJI_CATEGORIES).forEach(([cat, icon]) => {
+        const btn = document.createElement('button');
+        btn.className = 'emoji-picker-tab' + (cat === emojiCurrentCat ? ' active' : '');
+        btn.textContent = icon;
+        btn.onclick = () => { emojiCurrentCat = cat; buildEmojiGrid(); };
+        tabsEl.appendChild(btn);
+    });
+    buildEmojiGrid();
+    emojiPickerBuilt = true;
+}
+
+function buildEmojiGrid() {
+    const gridEl = document.getElementById('emoji-grid');
+    if (!gridEl) return;
+    // Update tabs
+    document.querySelectorAll('.emoji-picker-tab').forEach((t, i) => {
+        t.classList.toggle('active', Object.keys(EMOJI_CATEGORIES)[i] === emojiCurrentCat);
+    });
+    gridEl.innerHTML = '';
+    Object.entries(EMOJI_DATA).filter(([e, d]) => d.cat === emojiCurrentCat).forEach(([emoji]) => {
+        const btn = document.createElement('button');
+        btn.textContent = emoji;
+        btn.onclick = () => insertEmoji(emoji);
+        gridEl.appendChild(btn);
+    });
+}
+
+function insertEmoji(emoji) {
+    const inp = document.getElementById('chat-input');
+    if (!inp) return;
+    const start = inp.selectionStart || 0;
+    const end = inp.selectionEnd || 0;
+    inp.value = inp.value.slice(0, start) + emoji + inp.value.slice(end);
+    inp.focus();
+    inp.selectionStart = inp.selectionEnd = start + emoji.length;
+    updateSendBtn();
+}
+
+function toggleEmojiPicker(e) {
+    if (e) e.stopPropagation();
+    const picker = document.getElementById('emoji-picker');
+    if (!picker) return;
+    if (!emojiPickerBuilt) buildEmojiPicker();
+    picker.classList.toggle('visible');
+    if (picker.classList.contains('visible') && !document.getElementById('emoji-grid').children.length) {
+        buildEmojiGrid();
+    }
+}
+
+// Закрытие пикера при клике вне его
+document.addEventListener('click', function(e) {
+    const picker = document.getElementById('emoji-picker');
+    if (picker && picker.classList.contains('visible')) {
+        if (!picker.contains(e.target) && !e.target.closest('[onclick*="toggleEmojiPicker"]')) {
+            picker.classList.remove('visible');
+        }
+    }
+});
 
 // ===== ОТВЕТ НА СООБЩЕНИЕ =====
 function replyToMsg(mid) {
