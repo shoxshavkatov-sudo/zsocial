@@ -60,39 +60,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Открой: **http://localhost:5050**
 
-### Демо-аккаунты
-| Логин | Пароль | Роль |
-|-------|--------|------|
-| `admin` | `admin` | Администратор |
-| `a_karimova` | `123456` | Пользователь (верифицирован) |
-| `b_aliev` | `123456` | Пользователь |
-| `c_yusupova` | `123456` | Приватный профиль |
 
-## ☁️ Деплой на Render
-
-1. Загрузите репозиторий на GitHub
-2. На [render.com](https://render.com) → **New** → **Web Service**
-3. Подключите репозиторий
-4. Настройки подхватятся из `render.yaml` автоматически:
-   - Build: `pip install -r requirements.txt`
-   - Start: `gunicorn --worker-class gevent --workers 1 --bind 0.0.0.0:$PORT wsgi:application`
-   - Persistent disk (1 ГБ) — БД и загрузки переживают деплой
-5. Добавьте переменные окружения:
-   - `SECRET_KEY` (генерируется автоматически)
-   - `MAIL_ENABLED=1` + `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — для email
-
-> Без SMTP-настроек (`MAIL_ENABLED=0`) сайт работает полностью, письма пишутся в лог вместо отправки.
-
-## 📧 Email-уведомления
-
-Через stdlib `smtplib` (без внешних зависимостей). Поддерживаются:
-- Лайк вашего поста
-- Комментарий под вашим постом
-- Новая подписка
-
-Каждый пользователь может отключить email-уведомления в настройках.
 
 ## 📁 Структура
 
@@ -115,17 +84,6 @@ ZSocial/
 └── uploads/            # Загруженные пользователями файлы
 ```
 
-## 🧪 Тесты
 
-```bash
-pip install pytest
-python -m pytest tests/ -v
-```
-
-22 теста покрывают: регистрацию/логин, создание постов, лайки/комментарии/закладки,
-треды комментариев (вложенные ответы), группы (создание/вступление/посты/права доступа),
-обмен сообщениями, права доступа (не-админ не в админку), пагинацию.
-
-## 🛠️ Технологии
 
 Python · Flask · Flask-SocketIO · Flask-WTF (CSRF) · Flask-Limiter · gevent · SQLite · smtplib · Vanilla JS · CSS3 · pytest
