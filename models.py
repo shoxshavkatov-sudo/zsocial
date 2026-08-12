@@ -244,6 +244,45 @@ def init_db():
         UNIQUE(post_id, user_id),
         FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
     );
+
+    -- ===== МУЗЫКА: плейлисты и лайки =====
+    CREATE TABLE IF NOT EXISTS playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        cover_color TEXT DEFAULT '#6d5efc',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL,
+        track_id TEXT,
+        track_name TEXT,
+        artist_name TEXT,
+        artwork_url TEXT,
+        preview_url TEXT,
+        duration INTEGER DEFAULT 30000,
+        source TEXT DEFAULT 'itunes',
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS liked_songs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        track_id TEXT,
+        track_name TEXT,
+        artist_name TEXT,
+        artwork_url TEXT,
+        preview_url TEXT,
+        duration INTEGER DEFAULT 30000,
+        source TEXT DEFAULT 'itunes',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, track_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     ''')
 
     # Настройки по умолчанию
@@ -475,6 +514,50 @@ def migrate_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )''')
 
+        # === МУЗЫКА ===
+        conn.execute('''CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            artist TEXT NOT NULL,
+            audio_url TEXT NOT NULL,
+            cover_url TEXT,
+            duration INTEGER DEFAULT 0,
+            genre TEXT DEFAULT '',
+            plays INTEGER DEFAULT 0,
+            source TEXT DEFAULT 'upload',
+            external_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS playlists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            cover_url TEXT,
+            is_public INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS playlist_tracks (
+            playlist_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            position INTEGER DEFAULT 0,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (playlist_id, track_id),
+            FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS track_likes (
+            user_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, track_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        )''')
+
     # === Индексы для производительности (IF NOT EXISTS — идемпотентно) ===
     conn.executescript('''
         CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
@@ -515,7 +598,8 @@ def backup_db_to_json():
                             'follows', 'messages', 'notifications', 'groups',
                             'group_members', 'group_messages', 'polls', 'poll_options',
                             'poll_votes', 'post_views', 'stories', 'story_views',
-                            'message_reactions', 'push_subscriptions']
+                            'message_reactions', 'push_subscriptions',
+                            'playlists', 'playlist_items', 'liked_songs']
         for t in tables_to_backup:
             try:
                 rows = conn.execute(f'SELECT * FROM "{t}"').fetchall()
@@ -1735,3 +1819,165 @@ class PushSubscription:
         db = get_db()
         db.execute('DELETE FROM push_subscriptions WHERE endpoint=?', (endpoint,))
         db.commit()
+
+
+# ==================== МУЗЫКА ====================
+class Track:
+    @staticmethod
+    def create(user_id, title, artist, audio_url, cover_url=None, duration=0, genre='', source='upload', external_id=None):
+        db = get_db()
+        cur = db.execute('''INSERT INTO tracks (user_id, title, artist, audio_url, cover_url, duration, genre, source, external_id)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (user_id, title, artist, audio_url, cover_url, duration, genre, source, external_id))
+        db.commit()
+        return Track.get(cur.lastrowid)
+
+    @staticmethod
+    def get(tid):
+        db = get_db()
+        return db.execute('SELECT * FROM tracks WHERE id=?', (tid,)).fetchone()
+
+    @staticmethod
+    def all(limit=50, offset=0, genre=None):
+        db = get_db()
+        if genre:
+            return db.execute('SELECT * FROM tracks WHERE genre=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+                              (genre, limit, offset)).fetchall()
+        return db.execute('SELECT * FROM tracks ORDER BY created_at DESC LIMIT ? OFFSET ?',
+                          (limit, offset)).fetchall()
+
+    @staticmethod
+    def search(query, limit=50):
+        db = get_db()
+        q = f'%{query}%'
+        return db.execute('''SELECT * FROM tracks
+            WHERE title LIKE ? OR artist LIKE ? OR genre LIKE ?
+            ORDER BY plays DESC, created_at DESC LIMIT ?''', (q, q, q, limit)).fetchall()
+
+    @staticmethod
+    def popular(limit=20):
+        db = get_db()
+        return db.execute('SELECT * FROM tracks ORDER BY plays DESC, created_at DESC LIMIT ?', (limit,)).fetchall()
+
+    @staticmethod
+    def increment_plays(tid):
+        db = get_db()
+        db.execute('UPDATE tracks SET plays = plays + 1 WHERE id=?', (tid,))
+        db.commit()
+
+    @staticmethod
+    def by_user(uid):
+        db = get_db()
+        return db.execute('SELECT * FROM tracks WHERE user_id=? ORDER BY created_at DESC', (uid,)).fetchall()
+
+    @staticmethod
+    def delete(tid, uid):
+        db = get_db()
+        t = Track.get(tid)
+        if t and (t['user_id'] == uid):
+            db.execute('DELETE FROM tracks WHERE id=?', (tid,))
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def genres():
+        db = get_db()
+        return [r['genre'] for r in db.execute(
+            'SELECT DISTINCT genre FROM tracks WHERE genre != "" ORDER BY genre').fetchall()]
+
+
+class TrackLike:
+    @staticmethod
+    def toggle(uid, tid):
+        db = get_db()
+        existing = db.execute('SELECT 1 FROM track_likes WHERE user_id=? AND track_id=?', (uid, tid)).fetchone()
+        if existing:
+            db.execute('DELETE FROM track_likes WHERE user_id=? AND track_id=?', (uid, tid))
+            db.commit()
+            return False
+        db.execute('INSERT OR IGNORE INTO track_likes (user_id, track_id) VALUES (?,?)', (uid, tid))
+        db.commit()
+        return True
+
+    @staticmethod
+    def is_liked(uid, tid):
+        db = get_db()
+        return bool(db.execute('SELECT 1 FROM track_likes WHERE user_id=? AND track_id=?', (uid, tid)).fetchone())
+
+    @staticmethod
+    def liked_tracks(uid):
+        db = get_db()
+        return db.execute('''SELECT t.* FROM tracks t
+            JOIN track_likes tl ON t.id = tl.track_id
+            WHERE tl.user_id=? ORDER BY tl.created_at DESC''', (uid,)).fetchall()
+
+    @staticmethod
+    def liked_ids(uid):
+        db = get_db()
+        return set(r['track_id'] for r in db.execute(
+            'SELECT track_id FROM track_likes WHERE user_id=?', (uid,)).fetchall())
+
+
+class Playlist:
+    @staticmethod
+    def create(uid, name, description='', cover_url=None, is_public=1):
+        db = get_db()
+        cur = db.execute('''INSERT INTO playlists (user_id, name, description, cover_url, is_public)
+            VALUES (?,?,?,?,?)''', (uid, name, description, cover_url, is_public))
+        db.commit()
+        return Playlist.get(cur.lastrowid)
+
+    @staticmethod
+    def get(pid):
+        db = get_db()
+        return db.execute('SELECT * FROM playlists WHERE id=?', (pid,)).fetchone()
+
+    @staticmethod
+    def by_user(uid):
+        db = get_db()
+        return db.execute('SELECT * FROM playlists WHERE user_id=? ORDER BY created_at DESC', (uid,)).fetchall()
+
+    @staticmethod
+    def public_playlists(limit=20):
+        db = get_db()
+        return db.execute('SELECT * FROM playlists WHERE is_public=1 ORDER BY created_at DESC LIMIT ?',
+                          (limit,)).fetchall()
+
+    @staticmethod
+    def add_track(pid, tid, position=None):
+        db = get_db()
+        if position is None:
+            cnt = db.execute('SELECT COUNT(*) c FROM playlist_tracks WHERE playlist_id=?', (pid,)).fetchone()['c']
+            position = cnt
+        db.execute('''INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+            VALUES (?,?,?)''', (pid, tid, position))
+        db.commit()
+
+    @staticmethod
+    def remove_track(pid, tid):
+        db = get_db()
+        db.execute('DELETE FROM playlist_tracks WHERE playlist_id=? AND track_id=?', (pid, tid))
+        db.commit()
+
+    @staticmethod
+    def tracks(pid):
+        db = get_db()
+        return db.execute('''SELECT t.* FROM tracks t
+            JOIN playlist_tracks pt ON t.id = pt.track_id
+            WHERE pt.playlist_id=? ORDER BY pt.position''', (pid,)).fetchall()
+
+    @staticmethod
+    def track_count(pid):
+        db = get_db()
+        return db.execute('SELECT COUNT(*) c FROM playlist_tracks WHERE playlist_id=?', (pid,)).fetchone()['c']
+
+    @staticmethod
+    def delete(pid, uid):
+        db = get_db()
+        p = Playlist.get(pid)
+        if p and p['user_id'] == uid:
+            db.execute('DELETE FROM playlists WHERE id=?', (pid,))
+            db.commit()
+            return True
+        return False

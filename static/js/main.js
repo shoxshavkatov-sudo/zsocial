@@ -2820,3 +2820,227 @@ function removeProfileMusic() {
         }
     });
 }
+// ============================================
+// МУЗЫКАЛЬНЫЙ ПЛЕЕР — Yandex.Music style
+// ============================================
+let musicAudio = null;
+let musicQueue = [];
+let musicIndex = 0;
+let musicShuffle = false;
+let musicRepeat = false; // false | 'one' | 'all'
+
+function initMusicPlayer() {
+    if (window.MUSIC_QUEUE) musicQueue = window.MUSIC_QUEUE;
+    musicAudio = document.getElementById('music-audio');
+    if (!musicAudio) return;
+    musicAudio.addEventListener('timeupdate', updateProgress);
+    musicAudio.addEventListener('loadedmetadata', function() {
+        document.getElementById('mp-duration').textContent = fmtTime(musicAudio.duration);
+    });
+    musicAudio.addEventListener('ended', function() {
+        if (musicRepeat === 'one') { musicAudio.currentTime = 0; musicAudio.play(); return; }
+        nextTrack();
+    });
+    musicAudio.addEventListener('play', function() {
+        document.getElementById('mp-play-icon').innerHTML = '<use href="#i-pause"/>';
+    });
+    musicAudio.addEventListener('pause', function() {
+        document.getElementById('mp-play-icon').innerHTML = '<use href="#i-play"/>';
+    });
+}
+
+function fmtTime(s) {
+    if (!s || isNaN(s)) return '0:00';
+    var m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+function playTrack(index) {
+    if (!musicQueue.length) return;
+    musicIndex = index;
+    var t = musicQueue[musicIndex];
+    if (!t) return;
+    musicAudio.src = t.audio;
+    musicAudio.play().catch(function() {});
+    // UI
+    document.getElementById('mini-title').textContent = t.title;
+    document.getElementById('mini-artist').textContent = t.artist;
+    var cover = document.getElementById('mini-cover');
+    if (t.cover) { cover.src = t.cover; cover.style.display = 'block'; }
+    else { cover.style.display = 'none'; }
+    // Blur background
+    if (t.cover) {
+        var bg = document.getElementById('music-bg');
+        if (bg) { bg.style.backgroundImage = 'url(' + t.cover + ')'; bg.classList.add('active'); }
+        var mpbg = document.getElementById('mini-player-bg');
+        if (mpbg) mpbg.style.backgroundImage = 'url(' + t.cover + ')';
+    }
+    document.getElementById('mini-player').classList.add('visible');
+    // Highlight playing track
+    document.querySelectorAll('.track-row').forEach(function(r) {
+        r.classList.toggle('playing', parseInt(r.dataset.trackId) === t.id);
+    });
+    // Increment plays
+    if (t.id) fetch('/music/track/' + t.id + '/play', { method: 'POST' }).catch(function() {});
+}
+
+function playAll(startIndex) {
+    startIndex = startIndex || 0;
+    playTrack(startIndex);
+}
+
+function togglePlay() {
+    if (!musicAudio.src) { if (musicQueue.length) playTrack(0); return; }
+    if (musicAudio.paused) musicAudio.play().catch(function() {});
+    else musicAudio.pause();
+}
+
+function nextTrack() {
+    if (!musicQueue.length) return;
+    if (musicShuffle) {
+        musicIndex = Math.floor(Math.random() * musicQueue.length);
+    } else {
+        musicIndex++;
+        if (musicIndex >= musicQueue.length) {
+            if (musicRepeat === 'all') musicIndex = 0;
+            else { musicAudio.pause(); return; }
+        }
+    }
+    playTrack(musicIndex);
+}
+
+function prevTrack() {
+    if (!musicQueue.length) return;
+    if (musicAudio.currentTime > 3) { musicAudio.currentTime = 0; return; }
+    musicIndex--;
+    if (musicIndex < 0) musicIndex = 0;
+    playTrack(musicIndex);
+}
+
+function updateProgress() {
+    if (!musicAudio.duration) return;
+    var pct = (musicAudio.currentTime / musicAudio.duration) * 100;
+    var fill = document.getElementById('mp-progress');
+    if (fill) fill.style.width = pct + '%';
+    var cur = document.getElementById('mp-current');
+    if (cur) cur.textContent = fmtTime(musicAudio.currentTime);
+}
+
+function seekTrack(e) {
+    if (!musicAudio.duration) return;
+    var bar = e.currentTarget.querySelector('.mp-progress-bar');
+    var rect = bar.getBoundingClientRect();
+    var pct = (e.clientX - rect.left) / rect.width;
+    musicAudio.currentTime = musicAudio.duration * Math.max(0, Math.min(1, pct));
+}
+
+function toggleShuffle() {
+    musicShuffle = !musicShuffle;
+    document.getElementById('mp-shuffle').classList.toggle('active', musicShuffle);
+    flashToast(musicShuffle ? 'Перемешивание включено' : 'Перемешивание выключено');
+}
+
+function toggleRepeat() {
+    if (musicRepeat === false) musicRepeat = 'all';
+    else if (musicRepeat === 'all') musicRepeat = 'one';
+    else musicRepeat = false;
+    var btn = document.getElementById('mp-repeat');
+    btn.classList.toggle('active', musicRepeat !== false);
+    btn.title = musicRepeat === 'one' ? 'Повтор одной' : musicRepeat === 'all' ? 'Повтор всех' : 'Без повтора';
+}
+
+let musicMuted = false;
+function toggleVolume() {
+    musicMuted = !musicMuted;
+    musicAudio.muted = musicMuted;
+    document.getElementById('mp-vol').classList.toggle('active', !musicMuted);
+}
+
+function toggleLike(tid, btn) {
+    fetch('/music/track/' + tid + '/like', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.liked) { btn.classList.add('liked'); }
+            else { btn.classList.remove('liked'); }
+        });
+}
+
+function deleteTrack(tid) {
+    if (!confirm('Удалить трек?')) return;
+    fetch('/music/track/' + tid + '/delete', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) location.reload(); });
+}
+
+function openUploadModal() { document.getElementById('upload-modal').style.display = 'flex'; }
+function closeUploadModal() { document.getElementById('upload-modal').style.display = 'none'; }
+
+function uploadTrack(e) {
+    e.preventDefault();
+    var form = e.target;
+    var fd = new FormData(form);
+    fetch('/music/upload', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok) { closeUploadModal(); flashToast('Трек загружен!'); location.reload(); }
+            else flashToast(d.error || 'Ошибка');
+        });
+}
+
+function createPlaylist() {
+    var name = prompt('Название плейлиста:');
+    if (!name) return;
+    var fd = new FormData();
+    fd.append('name', name);
+    fetch('/music/playlist/create', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) { flashToast('Плейлист создан'); location.reload(); } });
+}
+
+function expandPlayer() {
+    // TODO: full-screen player
+    flashToast('Полноэкранный плеер скоро');
+}
+
+// Поиск музыки (локальные + iTunes)
+let searchTimer = null;
+function searchMusic(q) {
+    clearTimeout(searchTimer);
+    if (q.length < 2) return;
+    searchTimer = setTimeout(function() {
+        // iTunes Search API — 30-сек превью, бесплатно
+        fetch('/api/music/search?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var container = document.getElementById('itunes-results');
+                var hint = document.getElementById('search-hint');
+                if (!container) return;
+                container.innerHTML = '';
+                if (hint) hint.style.display = 'none';
+                if (!d.results || !d.results.length) {
+                    if (hint) { hint.style.display = 'block'; hint.textContent = 'Ничего не найдено'; }
+                    return;
+                }
+                d.results.forEach(function(t) {
+                    var card = document.createElement('div');
+                    card.className = 'itunes-card';
+                    card.innerHTML =
+                        '<img src="' + (t.cover || '') + '" alt="">' +
+                        '<div class="itunes-card-body">' +
+                            '<div class="itunes-card-title">' + esc(t.title) + '</div>' +
+                            '<div class="itunes-card-artist">' + esc(t.artist) + '</div>' +
+                        '</div>' +
+                        '<button class="itunes-card-play"><svg class="icon"><use href="#i-play"/></svg></button>';
+                    card.onclick = function() {
+                        // Add to queue and play
+                        musicQueue = [{
+                            id: 0, title: t.title, artist: t.artist,
+                            audio: t.preview, cover: t.cover, duration: t.duration
+                        }];
+                        playTrack(0);
+                    };
+                    container.appendChild(card);
+                });
+            });
+    }, 400);
+}

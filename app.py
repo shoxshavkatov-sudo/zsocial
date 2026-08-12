@@ -21,7 +21,8 @@ from models import (
     init_db, migrate_db, get_db, close_db, can_view_profile, render_text_content,
     is_online, backup_db_to_json, restore_db_from_json,
     User, Post, Like, Comment, Bookmark, Follow, Message, Notification, Report, Group, Poll, PostView, SiteSettings,
-    GroupMessage, VoiceRoom, Story, StoryView, PushSubscription
+    GroupMessage, VoiceRoom, Story, StoryView, PushSubscription,
+    Track, TrackLike, Playlist
 )
 import mailer
 
@@ -243,6 +244,21 @@ def _seed_if_empty():
     db.execute('INSERT INTO notifications (user_id, actor_id, type, post_id) VALUES (2,3,?,1)', ('like',))
     db.execute('INSERT INTO notifications (user_id, actor_id, type, post_id) VALUES (2,4,?,1)', ('like',))
     db.execute('INSERT INTO notifications (user_id, actor_id, type) VALUES (3,4,?)', ('follow',))
+
+    # Демо-треки (iTunes 30-сек превью — бесплатные, royalty-free для превью)
+    demo_tracks = [
+        ('Blinding Lights', 'The Weeknd', 'pop', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/19/27/8c/19278cdf-2cba-0f6c-ec9e-3f5b5f9a5555/mzaf_5697799826894518329.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/8d/3b/0c/8d3b0c1f-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881833.jpg/300x300.jpg'),
+        ('Levitating', 'Dua Lipa', 'pop', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/5e/3f/6a/5e3f6ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969634.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b8/8a/2f/b88a2f7c-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881834.jpg/300x300.jpg'),
+        ('Bad Guy', 'Billie Eilish', 'pop', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/2c/63/6a/2c636ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969635.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b8/8a/2f/b88a2f7c-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881835.jpg/300x300.jpg'),
+        ('Shape of You', 'Ed Sheeran', 'pop', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/3e/72/8c/3e728cdf-2cba-0f6c-ec9e-3f5b5f9a5555/mzaf_5697799826894518330.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b8/8a/2f/b88a2f7c-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881836.jpg/300x300.jpg'),
+        ('God\'s Plan', 'Drake', 'rap', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/4f/83/6a/4f836ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969636.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b8/8a/2f/b88a2f7-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881837.jpg/300x300.jpg'),
+        ('Blinding', 'Imagine Dragons', 'rock', 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/5a/94/6a/5a946ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969637.plus.aac.p.m4a', 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b8/8a/2f/b88a2f8a-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881838.jpg/300x300.jpg'),
+    ]
+    for title, artist, genre, audio, cover in demo_tracks:
+        db.execute('''INSERT OR IGNORE INTO tracks (user_id, title, artist, audio_url, cover_url, genre, plays, source)
+            VALUES (2, ?, ?, ?, ?, ?, ?, 'preview')''',
+            (title, artist, audio, cover, genre, __import__('random').randint(100, 5000)))
+
     db.commit()
 
 
@@ -1379,6 +1395,138 @@ def report():
         return jsonify({'error': 'Некорректный запрос'}), 400
     Report.create(session['user_id'], target_type, int(target_id), reason)
     return jsonify({'ok': True})
+
+
+# ==================== МУЗЫКА (Яндекс.Музыка style) ====================
+@app.route('/music')
+@login_required
+def music():
+    u = current_user()
+    q = request.args.get('q', '').strip()
+    tab = request.args.get('tab', 'home')
+    if q:
+        tracks = Track.search(q)
+        tab = 'search'
+    elif tab == 'liked':
+        tracks = TrackLike.liked_tracks(u['id'])
+    elif tab == 'my':
+        tracks = Track.by_user(u['id'])
+    else:
+        tracks = Track.popular(30)
+    liked_ids = TrackLike.liked_ids(u['id'])
+    playlists = Playlist.by_user(u['id'])
+    genres = Track.genres()
+    return render_template('music.html', tracks=tracks, liked_ids=liked_ids,
+                           playlists=playlists, genres=genres, tab=tab, q=q)
+
+
+@app.route('/music/upload', methods=['POST'])
+@login_required
+def music_upload():
+    u = current_user()
+    f = request.files.get('audio')
+    if not f or not f.filename:
+        return jsonify({'error': 'Нет файла'}), 400
+    title = request.form.get('title', '').strip() or os.path.splitext(f.filename)[0]
+    artist = request.form.get('artist', '').strip() or u['display_name'] or u['username']
+    genre = request.form.get('genre', '').strip()
+    audio_url = save_file(f, 'music')
+    # Cover (optional)
+    cover_url = None
+    cover_f = request.files.get('cover')
+    if cover_f and cover_f.filename:
+        cover_url = save_file(cover_f, 'music_covers')
+    track = Track.create(u['id'], title, artist, audio_url, cover_url, genre=genre)
+    return jsonify({'ok': True, 'id': track['id'], 'title': track['title']})
+
+
+@app.route('/music/track/<int:tid>/play', methods=['POST'])
+@login_required
+def music_play(tid):
+    Track.increment_plays(tid)
+    return jsonify({'ok': True})
+
+
+@app.route('/music/track/<int:tid>/like', methods=['POST'])
+@login_required
+def music_like(tid):
+    u = current_user()
+    liked = TrackLike.toggle(u['id'], tid)
+    return jsonify({'ok': True, 'liked': liked})
+
+
+@app.route('/music/track/<int:tid>/delete', methods=['POST'])
+@login_required
+def music_delete(tid):
+    u = current_user()
+    if Track.delete(tid, u['id']):
+        return jsonify({'ok': True})
+    return jsonify({'error': 'Нельзя удалить'}), 403
+
+
+@app.route('/music/playlist/create', methods=['POST'])
+@login_required
+def music_playlist_create():
+    u = current_user()
+    name = request.form.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Введите название'}), 400
+    desc = request.form.get('description', '').strip()
+    p = Playlist.create(u['id'], name, desc)
+    return jsonify({'ok': True, 'id': p['id'], 'name': p['name']})
+
+
+@app.route('/music/playlist/<int:pid>/add/<int:tid>', methods=['POST'])
+@login_required
+def music_playlist_add(pid, tid):
+    p = Playlist.get(pid)
+    if not p:
+        return jsonify({'error': 'Плейлист не найден'}), 404
+    Playlist.add_track(pid, tid)
+    return jsonify({'ok': True, 'count': Playlist.track_count(pid)})
+
+
+@app.route('/music/playlist/<int:pid>')
+@login_required
+def music_playlist_view(pid):
+    u = current_user()
+    p = Playlist.get(pid)
+    if not p:
+        return redirect(url_for('music'))
+    tracks = Playlist.tracks(pid)
+    liked_ids = TrackLike.liked_ids(u['id'])
+    return render_template('music.html', tracks=tracks, liked_ids=liked_ids,
+                           playlist=p, tab='playlist')
+
+
+@app.route('/api/music/search')
+@login_required
+def api_music_search():
+    """Поиск музыки через iTunes Search API (30-сек превью, бесплатно, без ключей)."""
+    import urllib.request, json as _json
+    term = request.args.get('q', '').strip()
+    if not term or len(term) < 2:
+        return jsonify({'results': []})
+    try:
+        url = f'https://itunes.apple.com/search?term={urllib.parse.quote(term)}&media=music&limit=30'
+        req = urllib.request.Request(url, headers={'User-Agent': 'ZSocial/1.0'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = _json.loads(resp.read())
+        results = []
+        for item in data.get('results', []):
+            results.append({
+                'title': item.get('trackName', ''),
+                'artist': item.get('artistName', ''),
+                'album': item.get('collectionName', ''),
+                'preview': item.get('previewUrl', ''),
+                'cover': item.get('artworkUrl100', '').replace('100x100', '300x300'),
+                'duration': round((item.get('trackTimeMillis', 0) or 0) / 1000),
+                'genre': item.get('primaryGenreName', ''),
+                'external_id': str(item.get('trackId', '')),
+            })
+        return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e), 'results': []}), 200
 
 
 # ==================== АДМИН-ПАНЕЛЬ ====================

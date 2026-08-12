@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% block title %}Музыка · {{ site_name }}{% endblock %}
+{% block body %}
+<div class="music-page" id="music-page">
+
+    {# Динамический blur-фон от текущего трека #}
+    <div class="music-bg" id="music-bg"></div>
+
+    <div class="music-header">
+        <h1>Музыка</h1>
+        <div class="music-search-bar">
+            <svg class="icon"><use href="#i-search"/></svg>
+            <input type="text" id="music-search-input" placeholder="Песня, исполнитель, жанр..."
+                   value="{{ q }}" oninput="searchMusic(this.value)">
+            <button class="music-upload-btn" onclick="openUploadModal()" title="Загрузить">
+                <svg class="icon"><use href="#i-plus"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="music-tabs">
+        <button class="music-tab {% if tab == 'home' %}active{% endif %}" onclick="location.href='{{ url_for('music') }}'">Главная</button>
+        <button class="music-tab {% if tab == 'search' %}active{% endif %}" onclick="document.getElementById('music-search-input').focus()">Поиск</button>
+        <button class="music-tab {% if tab == 'liked' %}active{% endif %}" onclick="location.href='{{ url_for('music', tab='liked') }}'">Моя музыка</button>
+        <button class="music-tab {% if tab == 'my' %}active{% endif %}" onclick="location.href='{{ url_for('music', tab='my') }}'">Мои загрузки</button>
+    </div>
+
+    {% if tab == 'search' and q %}
+    <div class="music-section">
+        <h2>Результаты: «{{ q }}»</h2>
+        <div id="itunes-results" class="music-grid"></div>
+        <p class="music-hint" id="search-hint">Поиск в iTunes...</p>
+    </div>
+    {% endif %}
+
+    {% if playlist %}
+    <div class="music-section">
+        <div class="playlist-header">
+            <div class="playlist-cover">
+                {% if playlist.cover_url %}
+                <img src="{{ media_url(playlist.cover_url) }}">
+                {% else %}
+                <svg class="icon icon-xl"><use href="#i-music"/></svg>
+                {% endif %}
+            </div>
+            <div class="playlist-info">
+                <span class="playlist-badge">Плейлист</span>
+                <h2>{{ playlist.name }}</h2>
+                <p>{{ playlist.description or 'Без описания' }}</p>
+                <button class="btn btn-primary btn-sm" onclick="playAll(0)">▶ Играть</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="music-section" id="tracks-section">
+        {% if tab == 'home' %}
+        <h2>{% if playlist %}Треки{% else %}Популярное{% endif %}</h2>
+        {% elif tab == 'liked' %}
+        <h2>❤️ Любимые треки</h2>
+        {% elif tab == 'my' %}
+        <h2>📤 Мои загрузки</h2>
+        {% endif %}
+
+        {% if tracks %}
+        <div class="track-list" id="track-list">
+            {% for t in tracks %}
+            <div class="track-row" data-track-id="{{ t.id }}"
+                 data-title="{{ t.title|e }}"
+                 data-artist="{{ t.artist|e }}"
+                 data-audio="{{ media_url(t.audio_url) }}"
+                 data-cover="{{ media_url(t.cover_url) if t.cover_url else '' }}"
+                 data-duration="{{ t.duration or 0 }}"
+                 ondblclick="playTrack({{ loop.index0 }})">
+                <div class="track-index" onclick="playTrack({{ loop.index0 }})">
+                    <span class="track-num">{{ loop.index }}</span>
+                    <div class="track-play-icon"><svg class="icon"><use href="#i-play"/></svg></div>
+                </div>
+                <div class="track-cover">
+                    {% if t.cover_url %}
+                    <img src="{{ media_url(t.cover_url) }}">
+                    {% else %}
+                    <div class="track-cover-placeholder"><svg class="icon"><use href="#i-music"/></svg></div>
+                    {% endif %}
+                </div>
+                <div class="track-info">
+                    <div class="track-title">{{ t.title }}</div>
+                    <div class="track-artist">{{ t.artist }}{% if t.genre %} · {{ t.genre }}{% endif %}</div>
+                </div>
+                <div class="track-meta">
+                    {% if t.plays > 0 %}<span class="track-plays">▶ {{ t.plays }}</span>{% endif %}
+                </div>
+                <button class="track-like {% if t.id in liked_ids %}liked{% endif %}" onclick="toggleLike({{ t.id }}, this)" title="Нравится">
+                    <svg class="icon"><use href="#i-heart"/></svg>
+                </button>
+                <span class="track-duration">{{ '%d:%02d'|format((t.duration or 0)//60, (t.duration or 0)%60) if t.duration else '--:--' }}</span>
+                {% if t.user_id == cu.id %}
+                <button class="track-delete" onclick="deleteTrack({{ t.id }})" title="Удалить">
+                    <svg class="icon icon-sm"><use href="#i-trash"/></svg>
+                </button>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="music-empty">
+            <svg class="icon icon-xl"><use href="#i-music"/></svg>
+            <p>{% if tab == 'liked' %}Нет любимых треков{% elif tab == 'my' %}Вы не загружали музыку{% elif q %}Ничего не найдено{% else %}Пока нет треков — загрузите первый!{% endif %}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Мои плейлисты #}
+    {% if tab == 'home' and playlists %}
+    <div class="music-section">
+        <h2>Мои плейлисты</h2>
+        <div class="playlist-grid">
+            {% for p in playlists %}
+            <a href="{{ url_for('music_playlist_view', pid=p.id) }}" class="playlist-card">
+                <div class="playlist-card-cover">
+                    {% if p.cover_url %}<img src="{{ media_url(p.cover_url) }}">{% else %}<svg class="icon"><use href="#i-music"/></svg>{% endif %}
+                </div>
+                <div class="playlist-card-name">{{ p.name }}</div>
+                <div class="playlist-card-count">{{ p.track_count if p.track_count is defined else '' }}</div>
+            </a>
+            {% endfor %}
+            <button class="playlist-card playlist-card-add" onclick="createPlaylist()">
+                <svg class="icon icon-xl"><use href="#i-plus"/></svg>
+                <span>Новый плейлист</span>
+            </button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{# === Модал загрузки трека === #}
+<div class="modal-overlay" id="upload-modal" onclick="if(event.target===this)closeUploadModal()">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3>Загрузить трек</h3>
+            <button class="modal-close" onclick="closeUploadModal()"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <form onsubmit="uploadTrack(event)" class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+            <div>
+                <label>Аудиофайл (mp3, wav, ogg)</label>
+                <input type="file" name="audio" accept="audio/*" required class="input">
+            </div>
+            <div>
+                <label>Название</label>
+                <input type="text" name="title" placeholder="Название трека" class="input">
+            </div>
+            <div>
+                <label>Исполнитель</label>
+                <input type="text" name="artist" placeholder="Имя исполнителя" class="input" value="{{ cu.display_name or cu.username }}">
+            </div>
+            <div>
+                <label>Жанр</label>
+                <input type="text" name="genre" placeholder="поп, рэп, рок..." class="input">
+            </div>
+            <div>
+                <label>Обложка (опционально)</label>
+                <input type="file" name="cover" accept="image/*" class="input">
+            </div>
+            <button type="submit" class="btn btn-primary">Загрузить</button>
+        </form>
+    </div>
+</div>
+
+{# === Глобальный мини-плеер === #}
+<div class="mini-player" id="mini-player">
+    <div class="mini-player-bg" id="mini-player-bg"></div>
+    <div class="mini-player-content">
+        <div class="mini-player-track" onclick="expandPlayer()">
+            <div class="mini-player-cover">
+                <img id="mini-cover" src="" alt="">
+                <div class="mini-player-cover-placeholder"><svg class="icon"><use href="#i-music"/></svg></div>
+            </div>
+            <div class="mini-player-info">
+                <div class="mini-player-title" id="mini-title">Не выбрано</div>
+                <div class="mini-player-artist" id="mini-artist">—</div>
+            </div>
+        </div>
+        <div class="mini-player-controls">
+            <button class="mp-btn" onclick="prevTrack()" title="Назад"><svg class="icon"><use href="#i-prev"/></svg></button>
+            <button class="mp-btn mp-play" id="mp-play-btn" onclick="togglePlay()" title="Play/Pause">
+                <svg class="icon" id="mp-play-icon"><use href="#i-play"/></svg>
+            </button>
+            <button class="mp-btn" onclick="nextTrack()" title="Вперёд"><svg class="icon"><use href="#i-next"/></svg></button>
+        </div>
+        <div class="mini-player-progress" onclick="seekTrack(event)">
+            <span class="mp-time" id="mp-current">0:00</span>
+            <div class="mp-progress-bar">
+                <div class="mp-progress-fill" id="mp-progress"></div>
+            </div>
+            <span class="mp-time" id="mp-duration">0:00</span>
+        </div>
+        <div class="mini-player-actions">
+            <button class="mp-btn" onclick="toggleShuffle()" id="mp-shuffle" title="Перемешать"><svg class="icon icon-sm"><use href="#i-shuffle"/></svg></button>
+            <button class="mp-btn" onclick="toggleRepeat()" id="mp-repeat" title="Повтор"><svg class="icon icon-sm"><use href="#i-repeat"/></svg></button>
+            <button class="mp-btn" onclick="toggleVolume()" id="mp-vol" title="Громкость"><svg class="icon icon-sm"><use href="#i-volume"/></svg></button>
+        </div>
+    </div>
+    <audio id="music-audio" preload="metadata"></audio>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Очередь треков из шаблона
+    window.MUSIC_QUEUE = [
+        {% if tracks %}
+        {% for t in tracks %}
+        {
+            id: {{ t.id }},
+            title: {{ t.title|tojson|e }},
+            artist: {{ t.artist|tojson|e }},
+            audio: {{ media_url(t.audio_url)|tojson|e }},
+            cover: {{ (media_url(t.cover_url) if t.cover_url else '')|tojson|e }},
+            duration: {{ t.duration or 0 }},
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+        {% endif %}
+    ];
+    window.LIKED_IDS = [{% for id in liked_ids %}{{ id }}{% if not loop.last %},{% endif %}{% endfor %}];
+    initMusicPlayer();
+    {% if tab == 'search' and q %}searchMusic('{{ q|e }}');{% endif %}
+</script>
+{% endblock %}

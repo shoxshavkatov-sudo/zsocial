@@ -2255,3 +2255,250 @@ input[type="search"], textarea.input, select.input {
     -webkit-backdrop-filter: blur(8px);
 }
 
+
+/* ============================================
+   МУЗЫКА — Yandex.Music style + Liquid Glass
+   ============================================ */
+.music-page {
+    max-width: 900px; margin: 0 auto; padding: 70px 16px 120px;
+    position: relative; min-height: 100vh;
+}
+
+/* Динамический blur-фон от обложки */
+.music-bg {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: var(--bg); transition: background-image 0.8s ease;
+}
+.music-bg.active {
+    background-size: cover; background-position: center;
+    filter: blur(80px) saturate(180%); opacity: 0.3;
+}
+
+/* Заголовок + поиск */
+.music-header { margin-bottom: 20px; }
+.music-header h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 16px; }
+.music-search-bar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--glass-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: 999px; padding: 4px 4px 4px 16px;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+}
+.music-search-bar .icon { width: 18px; height: 18px; color: var(--text-muted); }
+.music-search-bar input {
+    flex: 1; border: none; background: none; color: var(--text);
+    font-size: 15px; padding: 12px 4px; outline: none; font-family: inherit;
+}
+.music-search-bar input::placeholder { color: var(--text-muted); }
+.music-search-bar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.music-upload-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent-grad); color: #fff; display: grid; place-items: center;
+    flex-shrink: 0; transition: all 0.2s; box-shadow: var(--shadow-accent);
+}
+.music-upload-btn:hover { transform: scale(1.08); }
+
+/* Табы */
+.music-tabs {
+    display: flex; gap: 4px; margin-bottom: 24px; overflow-x: auto;
+    scrollbar-width: none; padding: 4px;
+}
+.music-tabs::-webkit-scrollbar { display: none; }
+.music-tab {
+    flex-shrink: 0; padding: 8px 18px; border-radius: 999px; border: none;
+    background: var(--glass-card); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-secondary); cursor: pointer; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--glass-border); transition: all 0.2s; font-family: inherit;
+}
+.music-tab:hover { background: var(--glass-card-hover); }
+.music-tab.active { background: var(--accent-grad); color: #fff; border-color: transparent; }
+
+/* Секции */
+.music-section { margin-bottom: 32px; }
+.music-section h2 { font-size: 20px; font-weight: 700; margin-bottom: 14px; letter-spacing: -0.3px; }
+
+/* Сетка треков */
+.music-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+.music-hint { color: var(--text-muted); font-size: 14px; padding: 20px; text-align: center; }
+
+/* iTunes результат-карточка */
+.itunes-card {
+    background: var(--glass-card); backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border); border-radius: 16px; overflow: hidden;
+    cursor: pointer; transition: all 0.25s; position: relative;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+}
+.itunes-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.itunes-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.itunes-card-body { padding: 10px 12px; }
+.itunes-card-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.itunes-card-artist { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.itunes-card-play {
+    position: absolute; bottom: 50px; right: 10px;
+    width: 42px; height: 42px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent-grad); color: #fff; display: grid; place-items: center;
+    opacity: 0; transform: translateY(8px); transition: all 0.25s;
+    box-shadow: var(--shadow-accent);
+}
+.itunes-card:hover .itunes-card-play { opacity: 1; transform: translateY(0); }
+
+/* Список треков */
+.track-list { display: flex; flex-direction: column; gap: 2px; }
+.track-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+    border-radius: 12px; cursor: pointer; transition: background 0.15s;
+    position: relative;
+}
+.track-row:hover { background: var(--glass-card); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.track-row.playing { background: var(--accent-soft); }
+.track-row.playing .track-title { color: var(--accent); }
+
+.track-index { width: 32px; text-align: center; flex-shrink: 0; position: relative; }
+.track-num { font-size: 14px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.track-row:hover .track-num { opacity: 0; }
+.track-play-icon {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    opacity: 0; color: var(--accent); transition: opacity 0.15s;
+}
+.track-row:hover .track-play-icon { opacity: 1; }
+
+.track-cover { width: 44px; height: 44px; border-radius: 10px; overflow: hidden; flex-shrink: 0; background: var(--bg-muted); }
+.track-cover img { width: 100%; height: 100%; object-fit: cover; }
+.track-cover-placeholder {
+    width: 100%; height: 100%; display: grid; place-items: center;
+    background: var(--accent-grad); color: rgba(255,255,255,0.7);
+}
+
+.track-info { flex: 1; min-width: 0; }
+.track-title { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-artist { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.track-meta { flex-shrink: 0; }
+.track-plays { font-size: 12px; color: var(--text-muted); }
+
+.track-like {
+    width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+    background: none; color: var(--text-muted); display: grid; place-items: center;
+    transition: all 0.2s; flex-shrink: 0;
+}
+.track-like:hover { background: var(--bg-hover); color: var(--danger); transform: scale(1.1); }
+.track-like.liked { color: var(--danger); }
+.track-like.liked .icon { fill: var(--danger); }
+.track-duration { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; flex-shrink: 0; }
+.track-delete {
+    width: 30px; height: 30px; border-radius: 50%; border: none; cursor: pointer;
+    background: none; color: var(--text-muted); display: grid; place-items: center;
+    transition: all 0.15s; opacity: 0; flex-shrink: 0;
+}
+.track-row:hover .track-delete { opacity: 1; }
+.track-delete:hover { color: var(--danger); background: var(--danger-soft); }
+
+/* Плейлисты */
+.playlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+.playlist-card {
+    background: var(--glass-card); backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid var(--glass-border); border-radius: 16px; overflow: hidden;
+    cursor: pointer; transition: all 0.25s; text-decoration: none; color: inherit;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-highlight);
+}
+.playlist-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.playlist-card-cover {
+    width: 100%; aspect-ratio: 1; display: grid; place-items: center;
+    background: var(--accent-grad); color: rgba(255,255,255,0.8); overflow: hidden;
+}
+.playlist-card-cover img { width: 100%; height: 100%; object-fit: cover; }
+.playlist-card-cover .icon { width: 40px; height: 40px; }
+.playlist-card-name { padding: 10px 12px 2px; font-size: 14px; font-weight: 600; }
+.playlist-card-count { padding: 0 12px 10px; font-size: 12px; color: var(--text-muted); }
+.playlist-card-add {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border: 2px dashed var(--glass-border); gap: 8px; aspect-ratio: auto; min-height: 180px;
+}
+.playlist-card-add .icon { color: var(--text-muted); }
+.playlist-card-add span { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+
+/* Заголовок плейлиста */
+.playlist-header { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap; }
+.playlist-cover {
+    width: 180px; height: 180px; border-radius: 20px; overflow: hidden; flex-shrink: 0;
+    background: var(--accent-grad); display: grid; place-items: center; color: rgba(255,255,255,0.8);
+    box-shadow: var(--shadow-lg);
+}
+.playlist-cover img { width: 100%; height: 100%; object-fit: cover; }
+.playlist-cover .icon { width: 56px; height: 56px; }
+.playlist-info { flex: 1; min-width: 200px; }
+.playlist-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; }
+.playlist-info h2 { font-size: 32px; font-weight: 800; margin: 4px 0; }
+.playlist-info p { color: var(--text-muted); font-size: 14px; margin-bottom: 12px; }
+
+/* Пустое состояние */
+.music-empty {
+    text-align: center; padding: 60px 20px; color: var(--text-muted);
+}
+.music-empty .icon { width: 56px; height: 56px; margin-bottom: 12px; opacity: 0.3; }
+
+/* ============================================
+   МИНИ-ПЛЕЕР — floating glass bar (bottom)
+   ============================================ */
+.mini-player {
+    position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%) translateY(120%);
+    width: calc(100% - 24px); max-width: 700px; z-index: 95;
+    border-radius: 18px; overflow: hidden;
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.mini-player.visible { transform: translateX(-50%) translateY(0); }
+.mini-player-bg {
+    position: absolute; inset: 0; z-index: -1;
+    background-size: cover; background-position: center;
+    filter: blur(40px) saturate(180%); opacity: 0.25;
+}
+.mini-player-content {
+    position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    background: var(--glass-card); backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+.mini-player-track { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-shrink: 0; min-width: 0; max-width: 200px; }
+.mini-player-cover { width: 44px; height: 44px; border-radius: 10px; overflow: hidden; flex-shrink: 0; position: relative; background: var(--accent-grad); }
+.mini-player-cover img { width: 100%; height: 100%; object-fit: cover; }
+.mini-player-cover-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,0.6); }
+.mini-player-cover-placeholder .icon { width: 20px; height: 20px; }
+.mini-player-info { min-width: 0; }
+.mini-player-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-player-artist { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.mini-player-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.mp-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+    background: none; color: var(--text-secondary); display: grid; place-items: center;
+    transition: all 0.15s;
+}
+.mp-btn:hover { background: var(--bg-hover); color: var(--accent); }
+.mp-btn.active { color: var(--accent); }
+.mp-btn .icon { width: 20px; height: 20px; }
+.mp-play { width: 44px; height: 44px; background: var(--accent-grad); color: #fff; box-shadow: var(--shadow-accent); }
+.mp-play:hover { transform: scale(1.08); color: #fff; }
+.mp-play .icon { width: 22px; height: 22px; }
+
+.mini-player-progress { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.mp-time { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; user-select: none; }
+.mp-progress-bar { flex: 1; height: 4px; background: var(--bg-hover); border-radius: 999px; cursor: pointer; position: relative; overflow: hidden; }
+.mp-progress-fill { height: 100%; background: var(--accent-grad); border-radius: 999px; width: 0%; transition: width 0.15s linear; }
+
+.mini-player-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+/* Мобильная адаптация плеера */
+@media (max-width: 640px) {
+    .mini-player-actions { display: none; }
+    .mini-player-track { max-width: 140px; }
+    .mp-time:first-child { display: none; }
+    .music-page { padding: 60px 10px 110px; }
+    .playlist-header { flex-direction: column; align-items: center; text-align: center; }
+    .track-meta, .track-duration { display: none; }
+}
