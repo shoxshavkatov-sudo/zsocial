@@ -262,6 +262,40 @@ def _seed_if_empty():
     db.commit()
 
 
+def _seed_music_if_empty():
+    """Добавляет демо-треки если таблица tracks пустая."""
+    import random as _rnd
+    db = get_db()
+    if db.execute('SELECT COUNT(*) c FROM tracks').fetchone()['c'] > 0:
+        return
+    demo_tracks = [
+        ('Blinding Lights', 'The Weeknd', 'pop',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/19/27/8c/19278cdf-2cba-0f6c-ec9e-3f5b5f9a5555/mzaf_5697799826894518329.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/88/62/d8/8862d8c7-5e2e-5e5e-5e5e-5e5e5e5e5e5e/881833.jpg/300x300.jpg'),
+        ('Levitating', 'Dua Lipa', 'pop',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/5e/3f/6a/5e3f6ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969634.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/8d/3b/0c/881834.jpg/300x300.jpg'),
+        ('Bad Guy', 'Billie Eilish', 'pop',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/2c/63/6a/2c636ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969635.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/8d/3b/0c/881835.jpg/300x300.jpg'),
+        ('Shape of You', 'Ed Sheeran', 'pop',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/3e/72/8c/3e728cdf-2cba-0f6c-ec9e-3f5b5f9a5555/mzaf_5697799826894518330.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/881836.jpg/300x300.jpg'),
+        ('God\'s Plan', 'Drake', 'rap',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/4f/83/6a/4f836ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969636.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/881837.jpg/300x300.jpg'),
+        ('Believer', 'Imagine Dragons', 'rock',
+         'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/5a/94/6a/5a946ac1-2f2d-fd40-3a82-3f5b5f9a5555/mzaf_3362578412895969637.plus.aac.p.m4a',
+         'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/881838.jpg/300x300.jpg'),
+    ]
+    for title, artist, genre, audio, cover in demo_tracks:
+        db.execute('''INSERT INTO tracks (user_id, title, artist, audio_url, cover_url, genre, plays, source)
+            VALUES (2, ?, ?, ?, ?, ?, ?, 'preview')''',
+            (title, artist, audio, cover, genre, _rnd.randint(100, 5000)))
+    db.commit()
+    print(f'[seed] Добавлено {len(demo_tracks)} демо-треков')
+
+
 # Инициализация БД с демо-данными при первом запуске
 with app.app_context():
     init_db()
@@ -270,6 +304,8 @@ with app.app_context():
     restored = restore_db_from_json()
     if not restored:
         _seed_if_empty()
+    # Демо-треки для музыки (если таблица пустая)
+    _seed_music_if_empty()
     # Создаём первичный бэкап
     backup_db_to_json()
 
